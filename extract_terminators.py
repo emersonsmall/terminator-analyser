@@ -63,21 +63,22 @@ def main():
     for genome, annotation in filenames:
         # use gffread to extract transcripts for every gene (all exons combined)
         # gffread usage https://ccb.jhu.edu/software/stringtie/gff.shtml
-        name = genome.split('.')[0]
-        transcript_path = os.path.join(os.getcwd(), TRANSCRIPTS_FOLDER_NAME, name + ".fa")
+        transcript_path = os.path.join(os.getcwd(), TRANSCRIPTS_FOLDER_NAME, genome.split('.')[0] + ".fa")
         genome_path = os.path.join(input_folder, genome)
         annotation_path = os.path.join(input_folder, annotation)
         subprocess.run(["gffread", "-w", transcript_path, "-g", genome_path, annotation_path])
 
-        # extract 3'UTRs from the transcripts
+        # extract 3'UTRs from transcripts
 
 
-        # search annotation file for gene and extract global coords
-
+        # search annotation file for gene and find global coords
+        
 
         # extract X nucleotides from the end of the sequence
 
+
         # add to 3'UTR to form full terminator
+
 
 if __name__ == "__main__":
     main()
