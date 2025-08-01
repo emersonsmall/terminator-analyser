@@ -3,8 +3,10 @@ import sys
 import subprocess
 
 NUM_CMD_LINE_ARGS = 1
-TRANSCRIPTS_FOLDER_NAME = "gffread_transcripts"
-OUTPUT_FOLDER_NAME = "terminator_sequences"
+OUTPUT_FOLDER = "output"
+TRANSCRIPTS_FOLDER = os.path.join(OUTPUT_FOLDER, "gffread_transcripts")
+TERMINATORS_FOLDER = os.path.join(OUTPUT_FOLDER, "terminators")
+UTRS_FOLDER = os.path.join(OUTPUT_FOLDER, "3utrs")
 
 def create_folder(path: str) -> None:
     """
@@ -57,13 +59,14 @@ def main():
             return
         filenames.append((fasta_files[i], annotation_files[i]))
     
-    create_folder(TRANSCRIPTS_FOLDER_NAME)
-    create_folder(OUTPUT_FOLDER_NAME)
+    create_folder(TRANSCRIPTS_FOLDER)
+    create_folder(UTRS_FOLDER)
+    create_folder(TERMINATORS_FOLDER)
 
     for genome, annotation in filenames:
         # use gffread to extract transcripts for every gene (all exons combined)
         # gffread usage https://ccb.jhu.edu/software/stringtie/gff.shtml
-        transcript_path = os.path.join(os.getcwd(), TRANSCRIPTS_FOLDER_NAME, genome.split('.')[0] + ".fa")
+        transcript_path = os.path.join(os.getcwd(), TRANSCRIPTS_FOLDER, genome.split('.')[0] + ".fa")
         genome_path = os.path.join(input_folder, genome)
         annotation_path = os.path.join(input_folder, annotation)
         subprocess.run(["gffread", "-w", transcript_path, "-g", genome_path, annotation_path])
