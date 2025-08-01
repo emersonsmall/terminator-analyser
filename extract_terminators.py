@@ -4,7 +4,7 @@ import os
 import sys
 import subprocess
 
-NUM_CMD_LINE_ARGS = 1
+MIN_CMD_LINE_ARGS = 1
 
 SUCCESS_EXIT_CODE = 0
 FAILURE_EXIT_CODE = 1
@@ -14,8 +14,8 @@ TRANSCRIPTS_FOLDER = os.path.join(OUTPUT_FOLDER, "gffread_transcripts")
 TERMINATORS_FOLDER = os.path.join(OUTPUT_FOLDER, "terminators")
 UTRS_FOLDER = os.path.join(OUTPUT_FOLDER, "3utrs")
 
-ALLOWED_FASTA_EXTENSIONS = {"fasta", "fas", "fa", "fna", "ffn", "faa", "mpfa", "frn"}
-ALLOWED_GFF_EXTENSIONS = {"gff", "gff3"}
+FASTA_EXTENSIONS = {"fasta", "fas", "fa", "fna", "ffn", "faa", "mpfa", "frn"}
+GFF_EXTENSIONS = {"gff", "gff3"}
 
 def create_folder(path: str) -> None:
     """
@@ -34,12 +34,14 @@ def create_folder(path: str) -> None:
             sys.exit(FAILURE_EXIT_CODE)
 
 
-def main():
+def main() -> int:
     # read input folder name from command line argument
-    if len(sys.argv) != NUM_CMD_LINE_ARGS + 1:
+    if len(sys.argv) != MIN_CMD_LINE_ARGS + 1:
         print(f"Usage: {sys.argv[0]} <path to input folder>")
         return FAILURE_EXIT_CODE
     
+    # TODO add cmd line arg for num nucleotides to extract to the right of CS
+
     input_folder = sys.argv[1]
     if not os.path.isdir(input_folder):
         print(f"Error: {input_folder} is not a valid directory.")
@@ -49,12 +51,12 @@ def main():
     fasta_files = []
     gff_files = []
     for file in os.listdir(input_folder):
-        file_ext = file.split('.')[1]
-        if file_ext in ALLOWED_FASTA_EXTENSIONS:
+        file_ext = file.split('.')[-1]
+        if file_ext in FASTA_EXTENSIONS:
             fasta_files.append(file)
-        elif file_ext in ALLOWED_GFF_EXTENSIONS:
+        elif file_ext in GFF_EXTENSIONS:
             gff_files.append(file)
-
+    
     if len(fasta_files) != len(gff_files):
         print("Error: The number of genome files and annotation files must match.")
         return FAILURE_EXIT_CODE
@@ -75,17 +77,20 @@ def main():
     create_folder(UTRS_FOLDER)
     create_folder(TERMINATORS_FOLDER)
 
-    print("Extracting transcripts with gffread...")
     i = 1
     for genome, annotation in files:
+        genome_name = genome.split('.')[0]
+        print(f"Processing genome \"{genome_name}\" ({i} of {NUM_GENOMES})...")
+
         # use gffread to extract transcripts for every gene
-        transcript_path = os.path.join(os.getcwd(), TRANSCRIPTS_FOLDER, genome.split('.')[0] + "_transcripts" + ".fa")
+        transcript_path = os.path.join(os.getcwd(), TRANSCRIPTS_FOLDER, genome_name + "_transcripts.fa")
         genome_path = os.path.join(input_folder, genome)
         annotation_path = os.path.join(input_folder, annotation)
-        print(f"Processing genome {i} of {NUM_GENOMES}...")
+        print("Extracting transcripts with gffread...")
         subprocess.run(["gffread", "-w", transcript_path, "-g", genome_path, annotation_path])
 
-        print("Extracting transcripts finished...")
+        # TODO handle cases gffread can't parse - read stdout for "Error parsing" and remove gene from gff file???
+        
 
         # extract 3'UTRs from transcripts
 
@@ -97,9 +102,11 @@ def main():
 
 
         # add to 3'UTR to form full terminator
+
+
         i += 1
     
-    print("Script finished")
+    print("Finished")
     return SUCCESS_EXIT_CODE
 
 
