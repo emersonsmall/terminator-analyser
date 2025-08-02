@@ -10,7 +10,7 @@ MIN_CMD_LINE_ARGS = 1 # path to input folder
 SUCCESS_EXIT_CODE = 0
 FAILURE_EXIT_CODE = 1
 
-OUT_FOLDER = "output"
+OUT_FOLDER = "out"
 TRANSCRIPTS_FOLDER = os.path.join(OUT_FOLDER, "gffread_transcripts")
 TERMINATORS_FOLDER = os.path.join(OUT_FOLDER, "terminators")
 UTRS_FOLDER = os.path.join(OUT_FOLDER, "3utrs")
@@ -114,7 +114,7 @@ def create_folder(name: str) -> bool:
     path = os.path.join(os.getcwd(), name)
     if not os.path.exists(path):
         try:
-            os.mkdir(path)
+            os.makedirs(path, exist_ok=True)
             print(f"Created directory: {path}")
         except OSError as e:
             print(f"Error creating directory {path}: {e}")
@@ -161,17 +161,16 @@ def ingest_files(input_folder: str) -> list[tuple[str, str]]:
             gff_files.append(file)
     
     if len(fasta_files) != len(gff_files):
-        print("Error: The number of genome files and annotation files must match.")
+        print("Error: The number of fasta files and gff files must match.")
         return []
     
     files = []
     for i in range(len(fasta_files)):
         if fasta_files[i].split('.')[0] != gff_files[i].split('.')[0]:
-            print(f"Error: Mismatched genome and annotation filenames: {fasta_files[i]} and {gff_files[i]}")
+            print(f"Error: Mismatched fasta and gff filenames: {fasta_files[i]} and {gff_files[i]}")
+            files = []
+            break
         files.append((fasta_files[i], gff_files[i]))
-    
-    if not files:
-        print(f"Error: No valid genome and annotation files found in folder {input_folder}.")
 
     return files
 
@@ -192,7 +191,6 @@ def main() -> int:
     files = ingest_files(input_folder)
     if not files:
         return FAILURE_EXIT_CODE
-    NUM_GENOMES = len(files)
 
     if not create_folder(TRANSCRIPTS_FOLDER) or not create_folder(UTRS_FOLDER) or not create_folder(TERMINATORS_FOLDER):
         return FAILURE_EXIT_CODE
@@ -200,14 +198,14 @@ def main() -> int:
     #TODO run this in parallel
     n = 1
     for fasta_file, gff_file in files:
-        genome_name = fasta_file.split('.')[0]
-        print(f"Processing genome \"{genome_name}\" ({n} of {NUM_GENOMES})...")
+        genome = fasta_file.split('.')[0]
+        print(f"Processing genome \"{genome}\" ({n} of {len(files)})...")
 
         # extract transcripts for every gene with gffread
-        transcript_path = os.path.join(os.getcwd(), TRANSCRIPTS_FOLDER, genome_name + "_transcripts.fa")
+        transcript_path = os.path.join(TRANSCRIPTS_FOLDER, genome + "_transcripts.fa")
         fasta_path = os.path.join(input_folder, fasta_file)
         gff_path = os.path.join(input_folder, gff_file)
-        print(f"Extracting transcripts for \"{genome_name}\" with gffread...")
+        print(f"Extracting transcripts for \"{genome}\" with gffread...")
         try:
             subprocess.run(["gffread", "-w", transcript_path, "-g", fasta_path, gff_path], capture_output=True, text=True, check=True)
         except subprocess.CalledProcessError as e:
@@ -226,7 +224,7 @@ def main() -> int:
                     lines = f.readlines()
 
                 create_folder(FILTERED_GFFS_FOLDER)
-                with open(os.path.join(FILTERED_GFFS_FOLDER, genome_name + "_filtered.gff"), 'w') as filtered_gff:
+                with open(os.path.join(FILTERED_GFFS_FOLDER, genome + "_filtered.gff"), 'w') as filtered_gff:
                     for line in lines:
                         if line not in lines_to_remove: # SIMPLY USE INDEX RANGE INSTEAD
                             filtered_gff.write(line)
