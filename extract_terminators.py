@@ -20,6 +20,90 @@ FASTA_EXTENSIONS = {"fasta", "fas", "fa", "fna", "ffn", "faa", "mpfa", "frn"}
 GFF_EXTENSIONS = {"gff", "gff3"}
 
 
+def parse_attributes(attr_string: str) -> dict[str, str]:
+    """
+    Parses a GFF attribute string into a dictionary.
+    Args:
+        attr_string (str): The attribute string from a GFF file.
+    Returns:
+        dict[str, str]: A dictionary mapping attribute names to their values.
+    """
+
+    attrs = {}
+    for attr in attr_string.split(';'):
+        if '=' in attr:
+            key, value = attr.split('=', 1)
+            attrs[key.strip()] = value.strip()
+    return attrs
+
+#TODO: fix. keep going down until you find a feature with a diff id and it's not a child feature of known features
+# keep going up until you find a gene feature with no parent
+# use index range to extract lines
+def find_related_features(gff_file_path: str, id: str) -> list[str]:
+    with open(gff_file_path, 'r') as f:
+        lines = f.readlines()
+    
+    start_idx = -1
+    for i, line in enumerate(lines):
+        if f"ID={id};" in line:
+            start_idx = i
+            break
+    
+    if start_idx == -1:
+        return []
+
+    known_ids = {id}
+    related_indices = {start_idx}
+
+    print("start idx, id", start_idx, id)
+
+    while True:
+        print("iterating through related features...")
+        added_feature = False
+
+        min_idx = min(related_indices)
+        max_idx = max(related_indices)
+
+        # check line above current block
+        above_idx = min_idx - 1
+        if above_idx >= 0:
+            line_above = lines[above_idx]
+            attrs_above = parse_attributes(line_above.split('\t')[-1])
+            id_above = attrs_above.get("ID")
+            if id_above in known_ids:
+                related_indices.add(above_idx)
+            line_to_check = lines[min_idx]
+            parent_id = parse_attributes(line_to_check.split('\t')[-1]).get("Parent")
+            if id_above == parent_id:
+                related_indices.add(above_idx)
+                known_ids.add(id_above)
+                added_feature = True
+        
+        # check line below current block
+        below_idx = max_idx + 1
+        if below_idx < len(lines):
+            line_below = lines[below_idx]
+            attrs_below = parse_attributes(line_below.split('\t')[-1])
+            id_below = attrs_below.get("ID")
+            if id_below in known_ids:
+                related_indices.add(below_idx)
+            parent_below = attrs_below.get("Parent")
+            if parent_below in known_ids:
+                related_indices.add(below_idx)
+                id_below = attrs_below.get("ID")
+                if id_below:
+                    known_ids.add(id_below)
+                added_feature = True
+        
+        # stop if no new relatives found
+        if not added_feature:
+            break
+    
+    # collect all lines
+    # RETURN INDEX RANGE INSTEAD
+    return [lines[i] for i in sorted(list(related_indices))]
+
+
 def create_folder(name: str) -> bool:
     """
     Creates a folder in the current directory if it does not already exist.
@@ -114,10 +198,10 @@ def main() -> int:
         return FAILURE_EXIT_CODE
 
     #TODO run this in parallel
-    i = 1
+    n = 1
     for fasta_file, gff_file in files:
         genome_name = fasta_file.split('.')[0]
-        print(f"Processing genome \"{genome_name}\" ({i} of {NUM_GENOMES})...")
+        print(f"Processing genome \"{genome_name}\" ({n} of {NUM_GENOMES})...")
 
         # extract transcripts for every gene with gffread
         transcript_path = os.path.join(os.getcwd(), TRANSCRIPTS_FOLDER, genome_name + "_transcripts.fa")
@@ -127,34 +211,28 @@ def main() -> int:
         try:
             subprocess.run(["gffread", "-w", transcript_path, "-g", fasta_path, gff_path], capture_output=True, text=True, check=True)
         except subprocess.CalledProcessError as e:
-            print(f"Error running gffread: {e}")
             print(e.stderr)
             if (e.stderr.startswith("Error parsing")):
-                # remove problem gene from gff file
+                # TODO: re-run gffread with filtered GFF file in while loop until no parsing errors (max iterations?)
+                # remove all lines related to problem gene from gff file
                 gff_line = e.stderr.split('\n')[1]
-                columns = gff_line.split('\t')
-                attributes = columns[-1]
-                id = attributes.split(';')[0].split('=')[1]
-                child_id = id
+                attrs = parse_attributes(gff_line.split('\t')[-1])
+                id = attrs.get("ID")
 
-                #TODO: fix so that this works for parsing errors on any feature type, not just gene
+                lines_to_remove = find_related_features(gff_path, id)
+                print(lines_to_remove)
 
-                # filter out lines with the above id and any children of that id
-                create_folder(FILTERED_GFFS_FOLDER)
                 with open(gff_path, 'r') as f:
-                    with open(os.path.join(FILTERED_GFFS_FOLDER, genome_name + "_filtered.gff"), 'w') as filtered_gff:
-                        lines = f.readlines()
-                        lines_written = 0
-                        for line in lines:
-                            if line.find(f"Parent={id};") != -1:
-                                columns = line.split('\t')
-                                attributes = columns[-1]
-                                child_id = attributes.split(';')[0].split('=')[1]
-                            if id not in line and child_id not in line:
-                                filtered_gff.write(line)
-                                lines_written += 1
+                    lines = f.readlines()
 
-                print(f"{len(lines) - lines_written} lines removed from {gff_file}.")
+                create_folder(FILTERED_GFFS_FOLDER)
+                with open(os.path.join(FILTERED_GFFS_FOLDER, genome_name + "_filtered.gff"), 'w') as filtered_gff:
+                    for line in lines:
+                        if line not in lines_to_remove: # SIMPLY USE INDEX RANGE INSTEAD
+                            filtered_gff.write(line)
+
+                print(f"{len(lines_to_remove)} lines removed from {gff_file}.")
+
             else:
                 return FAILURE_EXIT_CODE
 
@@ -171,7 +249,7 @@ def main() -> int:
         # add to 3'UTR to form full terminator
 
 
-        i += 1
+        n += 1
     
     print("Finished")
     return SUCCESS_EXIT_CODE
