@@ -10,11 +10,11 @@ MIN_CMD_LINE_ARGS = 1 # path to input folder
 SUCCESS_EXIT_CODE = 0
 FAILURE_EXIT_CODE = 1
 
-OUTPUT_FOLDER = "output"
-TRANSCRIPTS_FOLDER = os.path.join(OUTPUT_FOLDER, "gffread_transcripts")
-TERMINATORS_FOLDER = os.path.join(OUTPUT_FOLDER, "terminators")
-UTRS_FOLDER = os.path.join(OUTPUT_FOLDER, "3utrs")
-FILTERED_GFF_FOLDER = os.path.join(OUTPUT_FOLDER, "filtered_gffs")
+OUT_FOLDER = "output"
+TRANSCRIPTS_FOLDER = os.path.join(OUT_FOLDER, "gffread_transcripts")
+TERMINATORS_FOLDER = os.path.join(OUT_FOLDER, "terminators")
+UTRS_FOLDER = os.path.join(OUT_FOLDER, "3utrs")
+FILTERED_GFFS_FOLDER = os.path.join(OUT_FOLDER, "filtered_gffs")
 
 FASTA_EXTENSIONS = {"fasta", "fas", "fa", "fna", "ffn", "faa", "mpfa", "frn"}
 GFF_EXTENSIONS = {"gff", "gff3"}
@@ -119,7 +119,7 @@ def main() -> int:
         genome_name = fasta_file.split('.')[0]
         print(f"Processing genome \"{genome_name}\" ({i} of {NUM_GENOMES})...")
 
-        # use gffread to extract transcripts for every gene
+        # extract transcripts for every gene with gffread
         transcript_path = os.path.join(os.getcwd(), TRANSCRIPTS_FOLDER, genome_name + "_transcripts.fa")
         fasta_path = os.path.join(input_folder, fasta_file)
         gff_path = os.path.join(input_folder, gff_file)
@@ -130,37 +130,31 @@ def main() -> int:
             print(f"Error running gffread: {e}")
             print(e.stderr)
             if (e.stderr.startswith("Error parsing")):
-                # TODO remove gene from gff file (create filtered gff file with only valid genes)
+                # remove problem gene from gff file
                 gff_line = e.stderr.split('\n')[1]
-                print(gff_line)
                 columns = gff_line.split('\t')
-                attributes = columns[8]
+                attributes = columns[-1]
                 id = attributes.split(';')[0].split('=')[1]
                 child_id = id
 
-                # filter out lines with the above id and any children of that id
-                create_folder(FILTERED_GFF_FOLDER)
-                with open(gff_path, 'r') as f:
-                    lines = f.readlines()
-                    lines_written = 0
+                #TODO: fix so that this works for parsing errors on any feature type, not just gene
 
-                    for line in lines:
-                        if line.find(f"Parent={id}"):
-                            columns = line.split('\t')
-                            attributes = columns[8]
-                            child_id = attributes.split(';')[0].split('=')[1]
-                        if not line.startswith('#') and id not in line and child_id not in line:
-                            # write line to filtered gff file
-                            path = os.path.join(FILTERED_GFF_FOLDER, genome_name + "_filtered.gff")
-                            with open(path, 'w') as filtered:
-                                filtered.write(line)
-                            lines_written += 1
+                # filter out lines with the above id and any children of that id
+                create_folder(FILTERED_GFFS_FOLDER)
+                with open(gff_path, 'r') as f:
+                    with open(os.path.join(FILTERED_GFFS_FOLDER, genome_name + "_filtered.gff"), 'w') as filtered_gff:
+                        lines = f.readlines()
+                        lines_written = 0
+                        for line in lines:
+                            if line.find(f"Parent={id};") != -1:
+                                columns = line.split('\t')
+                                attributes = columns[-1]
+                                child_id = attributes.split(';')[0].split('=')[1]
+                            if id not in line and child_id not in line:
+                                filtered_gff.write(line)
+                                lines_written += 1
 
                 print(f"{len(lines) - lines_written} lines removed from {gff_file}.")
-                # try running gffread again with filtered gff file
-
-
-
             else:
                 return FAILURE_EXIT_CODE
 
