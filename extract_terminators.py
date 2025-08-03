@@ -20,6 +20,25 @@ FASTA_EXTENSIONS = {"fasta", "fas", "fa", "fna", "ffn", "faa", "mpfa", "frn"}
 GFF_EXTENSIONS = {"gff", "gff3"}
 
 
+def parse_cmd_line_args(args: list[str]):
+    """
+    Parses command line arguments.
+    """
+    # # read input folder name from command line argument
+    # if len(sys.argv) != MIN_CMD_LINE_ARGS + 1:
+    #     print(f"Usage: {sys.argv[0]} <path to input folder>")
+    #     return FAILURE_EXIT_CODE
+    
+    # # TODO add cmd line arg for num nucleotides to extract to the right of CS
+
+    # input_folder = sys.argv[1]
+    # if not os.path.isdir(input_folder):
+    #     print(f"Error: {input_folder} is not a valid directory.")
+    #     return FAILURE_EXIT_CODE
+    pass
+
+
+
 def parse_attributes(attr_string: str) -> dict[str, str]:
     """
     Parses a GFF attribute string into a dictionary.
@@ -28,7 +47,6 @@ def parse_attributes(attr_string: str) -> dict[str, str]:
     Returns:
         dict[str, str]: A dictionary mapping attribute names to their values.
     """
-
     attrs = {}
     for attr in attr_string.split(';'):
         if '=' in attr:
@@ -36,10 +54,16 @@ def parse_attributes(attr_string: str) -> dict[str, str]:
             attrs[key.strip()] = value.strip()
     return attrs
 
-#TODO: fix. keep going down until you find a feature with a diff id and it's not a child feature of known features
-# keep going up until you find a gene feature with no parent
-# use index range to extract lines
-def find_related_features(gff_file_path: str, id: str) -> list[str]:
+
+def find_related_features(gff_file_path: str, id: str) -> list[int]:
+    """
+    Searches a GFF file for the given ID and finds the range of lines that contain the feature and its related features.
+    Args:
+        gff_file_path (str): The path to the GFF file.
+        id (str): The ID of the feature to search for.
+    Returns:
+        list[int]: A list containing the start and end indices (inclusive) of the lines related to the feature
+    """
     with open(gff_file_path, 'r') as f:
         lines = f.readlines()
     
@@ -49,59 +73,54 @@ def find_related_features(gff_file_path: str, id: str) -> list[str]:
             start_idx = i
             break
     
-    if start_idx == -1:
+    if start_idx == -1: # ID not found
+        print(f"Error: ID {id} not found in GFF file {gff_file_path}.")
         return []
 
-    known_ids = {id}
-    related_indices = {start_idx}
+    min_idx = max_idx = start_idx
+    top_found = False
+    bottom_found = False
 
-    print("start idx, id", start_idx, id)
+    while not (top_found and bottom_found):
+        if not top_found:
+            # check line above current block
+            above_idx = min_idx - 1
+            if above_idx >= 0:
+                curr_line = lines[min_idx]
+                curr_attrs = parse_attributes(curr_line.split('\t')[-1])
+                curr_id = curr_attrs.get("ID")
 
-    while True:
-        print("iterating through related features...")
-        added_feature = False
+                line_above = lines[above_idx]
+                attrs_above = parse_attributes(line_above.split('\t')[-1])
+                id_above = attrs_above.get("ID")
+                parent_above = attrs_above.get("Parent")
 
-        min_idx = min(related_indices)
-        max_idx = max(related_indices)
-
-        # check line above current block
-        above_idx = min_idx - 1
-        if above_idx >= 0:
-            line_above = lines[above_idx]
-            attrs_above = parse_attributes(line_above.split('\t')[-1])
-            id_above = attrs_above.get("ID")
-            if id_above in known_ids:
-                related_indices.add(above_idx)
-            line_to_check = lines[min_idx]
-            parent_id = parse_attributes(line_to_check.split('\t')[-1]).get("Parent")
-            if id_above == parent_id:
-                related_indices.add(above_idx)
-                known_ids.add(id_above)
-                added_feature = True
+                if parent_above is None and curr_id != id_above:
+                    top_found = True
+                    continue
+                
+                min_idx -= 1
         
-        # check line below current block
-        below_idx = max_idx + 1
-        if below_idx < len(lines):
-            line_below = lines[below_idx]
-            attrs_below = parse_attributes(line_below.split('\t')[-1])
-            id_below = attrs_below.get("ID")
-            if id_below in known_ids:
-                related_indices.add(below_idx)
-            parent_below = attrs_below.get("Parent")
-            if parent_below in known_ids:
-                related_indices.add(below_idx)
+        if not bottom_found:
+            # check line below current block
+            below_idx = max_idx + 1
+            if below_idx < len(lines):
+                curr_line = lines[max_idx]
+                curr_attrs = parse_attributes(curr_line.split('\t')[-1])
+                curr_id = curr_attrs.get("ID")
+
+                line_below = lines[below_idx]
+                attrs_below = parse_attributes(line_below.split('\t')[-1])
                 id_below = attrs_below.get("ID")
-                if id_below:
-                    known_ids.add(id_below)
-                added_feature = True
-        
-        # stop if no new relatives found
-        if not added_feature:
-            break
+                parent_below = attrs_below.get("Parent")
+
+                if parent_below is None and curr_id != id_below:
+                    bottom_found = True
+                    continue
+
+                max_idx += 1
     
-    # collect all lines
-    # RETURN INDEX RANGE INSTEAD
-    return [lines[i] for i in sorted(list(related_indices))]
+    return [min_idx, max_idx]
 
 
 def create_folder(name: str) -> bool:
@@ -110,7 +129,6 @@ def create_folder(name: str) -> bool:
     Args:
         name (str): The name of the folder to create.
     """
-
     path = os.path.join(os.getcwd(), name)
     if not os.path.exists(path):
         try:
@@ -129,7 +147,6 @@ def extract_transcripts(input_folder: str, fasta_filename: str, gff_filename: st
     Returns:
         int: SUCCESS_EXIT_CODE if successful, FAILURE_EXIT_CODE otherwise.
     """
-    
     assert os.path.isdir(input_folder), f"Input folder {input_folder} does not exist or is not a directory."
     assert os.path.isfile(fasta_filename), f"FASTA file {fasta_filename} does not exist."
     assert os.path.isfile(gff_filename), f"GFF file {gff_filename} does not exist."
@@ -196,42 +213,48 @@ def main() -> int:
         return FAILURE_EXIT_CODE
 
     #TODO run this in parallel
+    # done this way as the extensions are not known
     n = 1
-    for fasta_file, gff_file in files:
-        genome = fasta_file.split('.')[0]
+    for fasta, gff in files:
+        genome = fasta.split('.')[0]
         print(f"Processing genome \"{genome}\" ({n} of {len(files)})...")
 
         # extract transcripts for every gene with gffread
-        transcript_path = os.path.join(TRANSCRIPTS_FOLDER, genome + "_transcripts.fa")
-        fasta_path = os.path.join(input_folder, fasta_file)
-        gff_path = os.path.join(input_folder, gff_file)
+        tscript_path = os.path.join(TRANSCRIPTS_FOLDER, genome + "_transcripts.fa")
+        fasta_path = os.path.join(input_folder, fasta)
+        gff_path = os.path.join(input_folder, gff)
         print(f"Extracting transcripts for \"{genome}\" with gffread...")
         try:
-            subprocess.run(["gffread", "-w", transcript_path, "-g", fasta_path, gff_path], capture_output=True, text=True, check=True)
-        except subprocess.CalledProcessError as e:
-            print(e.stderr)
-            if (e.stderr.startswith("Error parsing")):
+            subprocess.run(["gffread", "-w", tscript_path, "-g", fasta_path, gff_path], capture_output=True, text=True, check=True)
+        except subprocess.CalledProcessError as err:
+            print(err.stderr)
+            if (err.stderr.startswith("Error parsing")):
                 # TODO: re-run gffread with filtered GFF file in while loop until no parsing errors (max iterations?)
-                # remove all lines related to problem gene from gff file
-                gff_line = e.stderr.split('\n')[1]
+                # each iteration would be considered a feature/gene removed
+
+                # remove all lines related to problem feature
+                gff_line = err.stderr.split('\n')[1]
                 attrs = parse_attributes(gff_line.split('\t')[-1])
                 id = attrs.get("ID")
 
                 lines_to_remove = find_related_features(gff_path, id)
-                print(lines_to_remove)
 
                 with open(gff_path, 'r') as f:
                     lines = f.readlines()
 
                 create_folder(FILTERED_GFFS_FOLDER)
-                with open(os.path.join(FILTERED_GFFS_FOLDER, genome + "_filtered.gff"), 'w') as filtered_gff:
-                    for line in lines:
-                        if line not in lines_to_remove: # SIMPLY USE INDEX RANGE INSTEAD
+                f_name = genome + "_filtered.gff"
+                with open(os.path.join(FILTERED_GFFS_FOLDER, f_name), 'w') as filtered_gff:
+                    for i, line in enumerate(lines):
+                        if i not in range(lines_to_remove[0], lines_to_remove[1] + 1):
                             filtered_gff.write(line)
+                        else:
+                            print(f"Removing line {i}: {line}")
 
-                print(f"{len(lines_to_remove)} lines removed from {gff_file}.")
+                print(f"{lines_to_remove[1] - lines_to_remove[0] + 1} line/s filtered out for {f_name}.")
 
             else:
+                print("Error: unable to handle gffread error.")
                 return FAILURE_EXIT_CODE
 
 
