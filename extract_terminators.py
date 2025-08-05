@@ -23,6 +23,7 @@ def parse_cmd_line_args(args: list[str]) -> list[str]:
         return []
     
     # TODO add cmd line arg for num nucleotides to extract to the right of CS
+    # add arg for whether to filter GFFs or not, or set max features allowed to be removed
 
     input_folder = sys.argv[1]
     if not os.path.isdir(input_folder):
@@ -34,12 +35,14 @@ def parse_cmd_line_args(args: list[str]) -> list[str]:
 
 def parse_attributes(attributes: str) -> dict[str, str]:
     """
-    Parses a GFF attribute string into a dictionary.
+    Parses a GFF file attribute string into a dictionary.
     Args:
         attributes (str): The attribute string from a GFF file.
     Returns:
         dict[str, str]: A dictionary mapping attribute names to their values.
     """
+    assert isinstance(attributes, str), f"Invalid type for parameter 'attributes'"
+
     attrs = {}
     for attr in attributes.split(';'):
         if '=' in attr:
@@ -48,11 +51,19 @@ def parse_attributes(attributes: str) -> dict[str, str]:
     return attrs
 
 
-def build_feature_map(gff_lines: list[str]):
+def build_feature_map(gff_lines: list[str]) -> dict[str, list[dict[str, int | str | None]]]:
+    """
+    Creates a dictionary mapping each feature ID to its line index and parent. Handles duplicate feature IDs.
+    Args:
+        gff_lines (list[str]): A list of strings where each string is a line from a gff file.
+    Returns:
+        dict[str, list[dict[str, int | str | None]]]: A dictionary mapping each feature ID to a list of
+        dictionaries, where each dictionary represents a line with said feature ID.
+    """
     feature_map = {}
     for i, line in enumerate(gff_lines):
         if line.startswith('#') or not line.strip():
-            continue
+            continue # skip comments and blank lines
 
         try:
             # 9th column contains attributes string
@@ -71,7 +82,7 @@ def build_feature_map(gff_lines: list[str]):
                 feature_map[f_id].append(f_data)
         
         except IndexError:
-            continue
+            continue # skip lines that do not have an attribute column
 
     return feature_map
 
@@ -80,7 +91,7 @@ def find_related_features(gff_lines: list[str], start_id: str) -> tuple[str, lis
     """
     Searches a GFF file for the given ID and returns the line indices for the feature and any related features.
     Args:
-        lines (list[str]): A list of strings where each string is a line from a gff file.
+        gff_lines (list[str]): A list of strings where each string is a line from a gff file.
         start_id (str): The ID of the feature to search for.
     Returns:
         tuple[str, list[int]]: The 1st element is the root id of the feature, and the 2nd element is a list containing 
@@ -122,25 +133,36 @@ def find_related_features(gff_lines: list[str], start_id: str) -> tuple[str, lis
     return root_id, sorted(all_idxs)
 
 
-def filter_gff(in_path: str, id: str, out_path: str) -> str:
+def filter_gff(f_id: str, in_path: str, out_path: str):
     """
-    Filters a GFF file to remove lines related to a specific feature ID.
+    Filters a GFF file to remove all lines related to a given feature ID.
     Args:
         in_path (str): The path to the input GFF file.
-        id (str): The ID of the feature to filter out.
+        f_id (str): The ID of the feature to filter out.
         out_path (str): The path to the output GFF file.
     Returns:
         str: The root ID (top-level feature ID - i.e., gene ID) of the removed feature.
     """
-    with open(in_path, 'r') as f:
-        lines = f.readlines()
+    assert os.path.isfile(in_path), f"Input file {in_path} does not exist."
+    assert isinstance(f_id, str), f"Feature ID must be a string"
+
+    try:
+        with open(in_path, 'r') as f:
+            lines = f.readlines()
+    except OSError as e:
+        print(f"Error: Could not open input file '{in_path}': {e}")
+        return None
     
-    root_id, line_idxs = find_related_features(lines, id)
+    root_id, line_idxs = find_related_features(lines, f_id)
     
     lines_to_keep = [line for i, line in enumerate(lines) if i not in line_idxs]
 
-    with open(out_path, 'w') as f:
-        f.writelines(lines_to_keep)
+    try:
+        with open(out_path, 'w') as f:
+            f.writelines(lines_to_keep)
+    except OSError as e:
+        print(f"Error: Could not create/open output file '{out_path}': {e}")
+        return None
 
     print(f"{len(line_idxs)} line/s removed from {in_path}:")
     for i in line_idxs:
@@ -149,16 +171,16 @@ def filter_gff(in_path: str, id: str, out_path: str) -> str:
     return root_id
 
 
-def create_folder(name: str) -> bool:
+def create_folder(path: str) -> bool:
     """
     Creates a folder in the current directory if it does not already exist.
     Args:
         name (str): The name of the folder to create.
     """
-    path = os.path.join(os.getcwd(), name)
+    path = os.path.join(os.getcwd(), path)
     if not os.path.exists(path):
         try:
-            os.makedirs(path, exist_ok=True)
+            os.makedirs(path)
             print(f"Created directory: {path}")
         except OSError as e:
             print(f"Error creating directory {path}: {e}")
@@ -167,13 +189,13 @@ def create_folder(name: str) -> bool:
     return True
 
 
-def extract_transcripts(input_folder: str, fasta_fname: str, gff_fname: str) -> int:
+def extract_transcripts(in_dir: str, fasta_fname: str, gff_fname: str) -> int:
     """
     Extracts transcripts using gffread.
     Returns:
         int: SUCCESS_EXIT_CODE if successful, FAILURE_EXIT_CODE otherwise.
     """
-    assert os.path.isdir(input_folder), f"Input folder {input_folder} does not exist or is not a directory."
+    assert os.path.isdir(in_dir), f"Input folder {in_dir} does not exist or is not a directory."
     assert os.path.isfile(fasta_fname), f"FASTA file {fasta_fname} does not exist."
     assert os.path.isfile(gff_fname), f"GFF file {gff_fname} does not exist."
 
@@ -306,7 +328,7 @@ def main() -> int:
                     print("\nError: unable to handle gffread error.")
                     return FAILURE_EXIT_CODE
 
-                feature_removed = filter_gff(gff_path, id, filtered_gff_path)
+                feature_removed = filter_gff(id, gff_path, filtered_gff_path)
                 features_removed.append(feature_removed)
                 
         # extract 3'UTRs from transcripts
