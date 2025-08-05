@@ -4,11 +4,13 @@
 import os
 import sys
 import subprocess
+import functools
 
 SUCCESS_EXIT_CODE = 0
 FAILURE_EXIT_CODE = 1
 
 GFFREAD_ERRORS = ("Error parsing", "GffObj::getSpliced() error: improper genomic coordinate")
+MAX_GFFREAD_ITERATIONS = 10
 
 def parse_cmd_line_args(args: list[str]) -> list[str]:
     """
@@ -30,88 +32,121 @@ def parse_cmd_line_args(args: list[str]) -> list[str]:
     return [input_folder]
 
 
-def parse_attributes(attr_string: str) -> dict[str, str]:
+def parse_attributes(attributes: str) -> dict[str, str]:
     """
     Parses a GFF attribute string into a dictionary.
     Args:
-        attr_string (str): The attribute string from a GFF file.
+        attributes (str): The attribute string from a GFF file.
     Returns:
         dict[str, str]: A dictionary mapping attribute names to their values.
     """
     attrs = {}
-    for attr in attr_string.split(';'):
+    for attr in attributes.split(';'):
         if '=' in attr:
-            key, value = attr.split('=', 1)
-            attrs[key.strip()] = value.strip()
+            key, val = attr.split('=', 1)
+            attrs[key.strip()] = val.strip()
     return attrs
 
 
-def find_related_features(gff_lines: list[str], id: str) -> tuple[str, list[int]]:
+def build_feature_map(gff_lines: list[str]):
+    feature_map = {}
+    for i, line in enumerate(gff_lines):
+        if line.startswith('#') or not line.strip():
+            continue
+
+        try:
+            # 9th column contains attributes string
+            attrs = parse_attributes(line.split('\t')[8])
+            f_id = attrs.get("ID")
+
+            if f_id:
+                f_data = {
+                    "idx": i,
+                    "parent": attrs.get("Parent"),
+                }
+
+                if f_id not in feature_map:
+                    feature_map[f_id] = []
+                
+                feature_map[f_id].append(f_data)
+        
+        except IndexError:
+            continue
+
+    return feature_map
+
+
+def find_related_features(gff_lines: list[str], start_id: str) -> tuple[str, list[int]]:
     """
-    Searches a GFF file for the given ID and finds the range of lines that contain the feature and its related features.
-    ASSUMPTIONS: related features form a block in the GFF file, i.e. they are consecutive lines.
+    Searches a GFF file for the given ID and returns the line indices for the feature and any related features.
     Args:
         lines (list[str]): A list of strings where each string is a line from a gff file.
-        id (str): The ID of the feature to search for.
+        start_id (str): The ID of the feature to search for.
     Returns:
-        list[int]: A list containing the start and end indices (inclusive) of the lines related to the feature
+        tuple[str, list[int]]: The 1st element is the root id of the feature, and the 2nd element is a list containing 
+                               the line indices of the lines related to the feature.
     """
-    start_idx = -1
-    for i, line in enumerate(gff_lines):
-        if f"ID={id};" in line:
-            start_idx = i
-            break
-    
-    if start_idx == -1:
-        print(f"Error: ID {id} not found in GFF file contents.")
+    feature_map = build_feature_map(gff_lines)
+
+    if start_id not in feature_map:
+        print(f"Error: ID {start_id} not found.")
         return tuple()
 
-    root_id = id
-    min_idx = max_idx = start_idx
-    top_found = False
-    bottom_found = False
-
-    while not (top_found and bottom_found):
-        if not top_found:
-            # check line above current block
-            above_idx = min_idx - 1
-            if above_idx >= 0:
-                curr_line = gff_lines[min_idx]
-                curr_attrs = parse_attributes(curr_line.split('\t')[-1])
-                curr_id = curr_attrs.get("ID")
-
-                line_above = gff_lines[above_idx]
-                attrs_above = parse_attributes(line_above.split('\t')[-1])
-                id_above = attrs_above.get("ID")
-                parent_above = attrs_above.get("Parent")
-
-                if parent_above is None and curr_id != id_above:
-                    root_id = curr_id
-                    top_found = True
-                    continue
-                
-                min_idx -= 1
+    @functools.lru_cache(maxsize=None)
+    def get_root(f_id: str) -> str:
+        if f_id not in feature_map:
+            return f_id
         
-        if not bottom_found:
-            # check line below current block
-            below_idx = max_idx + 1
-            if below_idx < len(gff_lines):
-                curr_line = gff_lines[max_idx]
-                curr_attrs = parse_attributes(curr_line.split('\t')[-1])
-                curr_id = curr_attrs.get("ID")
+        parent = feature_map[f_id][0].get("parent")
 
-                line_below = gff_lines[below_idx]
-                attrs_below = parse_attributes(line_below.split('\t')[-1])
-                id_below = attrs_below.get("ID")
-                parent_below = attrs_below.get("Parent")
+        if parent:
+            return get_root(parent)
 
-                if parent_below is None and curr_id != id_below:
-                    bottom_found = True
-                    continue
-
-                max_idx += 1
+        return f_id
     
-    return (root_id, [min_idx, max_idx])
+    root_id = get_root(start_id)
+
+    all_ids = [
+        f_id for f_id in feature_map
+        if get_root(f_id) == root_id
+    ]
+
+    all_idxs = []
+    for f_id in all_ids:
+        for part in feature_map[f_id]:
+            all_idxs.append(part["idx"])
+
+    if not all_idxs:
+        return tuple()
+
+    return root_id, sorted(all_idxs)
+
+
+def filter_gff(in_path: str, id: str, out_path: str) -> str:
+    """
+    Filters a GFF file to remove lines related to a specific feature ID.
+    Args:
+        in_path (str): The path to the input GFF file.
+        id (str): The ID of the feature to filter out.
+        out_path (str): The path to the output GFF file.
+    Returns:
+        str: The root ID (top-level feature ID - i.e., gene ID) of the removed feature.
+    """
+    with open(in_path, 'r') as f:
+        lines = f.readlines()
+    
+    root_id, line_idxs = find_related_features(lines, id)
+    
+    lines_to_keep = [line for i, line in enumerate(lines) if i not in line_idxs]
+
+    with open(out_path, 'w') as f:
+        f.writelines(lines_to_keep)
+
+    print(f"{len(line_idxs)} line/s removed from {in_path}:")
+    for i in line_idxs:
+        print(lines[i], end="")
+    
+    return root_id
 
 
 def create_folder(name: str) -> bool:
@@ -155,8 +190,15 @@ def extract_3utrs() -> int:
     return SUCCESS_EXIT_CODE
 
 
-def ingest_files(input_folder: str) -> list[tuple[str, str]]:
-    assert os.path.isdir(input_folder), f"Folder {input_folder} does not exist or is not a directory."
+def find_files(dir: str) -> list[tuple[str, str]]:
+    """
+    Searches the given directory for fasta and gff files and enforces gffread requirements.
+    Args:
+        dir (str): The path to the directory to search.
+    Returns:
+        list[tuple[str, str]]: A list of tuples, where each tuple is a pair of a fasta and gff filenames
+    """
+    assert os.path.isdir(dir), f"Folder {dir} does not exist or is not a directory."
 
     FASTA_EXTENSIONS = ("fasta", "fas", "fa", "fna", "ffn", "faa", "mpfa", "frn")
     GFF_EXTENSIONS = ("gff", "gff3")
@@ -164,7 +206,7 @@ def ingest_files(input_folder: str) -> list[tuple[str, str]]:
     # iterate through all files in the input folder
     fasta_files = []
     gff_files = []
-    for file in os.listdir(input_folder):
+    for file in os.listdir(dir):
         file_ext = file.split('.')[-1]
         if file_ext in FASTA_EXTENSIONS:
             fasta_files.append(file)
@@ -188,18 +230,18 @@ def ingest_files(input_folder: str) -> list[tuple[str, str]]:
 
 def main() -> int:
     OUT_FOLDER = "out"
+    FILTERED_GFFS_FOLDER = os.path.join(OUT_FOLDER, "filtered_gffs")
     TRANSCRIPTS_FOLDER = os.path.join(OUT_FOLDER, "gffread_transcripts")
     TERMINATORS_FOLDER = os.path.join(OUT_FOLDER, "terminators")
     UTRS_FOLDER = os.path.join(OUT_FOLDER, "3utrs")
-    FILTERED_GFFS_FOLDER = os.path.join(OUT_FOLDER, "filtered_gffs")
 
     args = parse_cmd_line_args(sys.argv)
     if not args:
         return FAILURE_EXIT_CODE
-    input_folder = args[0]
+    input_dir = args[0]
 
-    files = ingest_files(input_folder)
-    if not files:
+    FILES = find_files(input_dir)
+    if not FILES:
         return FAILURE_EXIT_CODE
 
     if not create_folder(TRANSCRIPTS_FOLDER) or not create_folder(UTRS_FOLDER) or not create_folder(TERMINATORS_FOLDER):
@@ -207,29 +249,28 @@ def main() -> int:
 
     #TODO run in parallel
     n = 1
-    for fasta, gff in files:
+    for fasta, gff in FILES:
         genome = fasta.split('.')[0]
-        print(f"Processing genome \"{genome}\" ({n} of {len(files)})...")
+        print(f"\nProcessing genome \"{genome}\" ({n} of {len(FILES)})...")
 
         print(f"Extracting transcripts for \"{genome}\" with gffread...")
 
         # extract transcripts for every gene with gffread
         tscript_path = os.path.join(TRANSCRIPTS_FOLDER, genome + "_transcripts.fa")
-        fasta_path = os.path.join(input_folder, fasta)
-        gff_path = os.path.join(input_folder, gff)
+        fasta_path = os.path.join(input_dir, fasta)
+        gff_path = os.path.join(input_dir, gff)
 
         first_run = True
-        filtered_fname = genome + "_filtered.gff"
+        filtered_gff_path = os.path.join(FILTERED_GFFS_FOLDER, genome + "_filtered.gff")
         features_removed: list[str] = []
         create_folder(FILTERED_GFFS_FOLDER)
 
-        # max iterations?
-        while True:
+        for i in range(MAX_GFFREAD_ITERATIONS):
             if first_run:
                 first_run = False
             else:
-                print("\nRe-running gffread with filtered GFF file...")
-                gff_path = os.path.join(FILTERED_GFFS_FOLDER, filtered_fname)
+                print(f"\nRe-running gffread with {filtered_gff_path}...")
+                gff_path = filtered_gff_path
 
             try:
                 subprocess.run(
@@ -243,49 +284,33 @@ def main() -> int:
                     text=True, 
                     check=True)
                 
-                print(f"\nTranscripts successfully extracted to {tscript_path}")
+                print(f"Transcripts successfully extracted to {tscript_path}")
 
                 if features_removed:
-                    print(f"Features removed from GFF file: {'\n'.join(features_removed)}")
+                    print(f"Features removed from \"{genome}\":\n{'\n'.join(features_removed)}")
                 
                 break
             except subprocess.CalledProcessError as err:
                 print(err.stderr)
 
-                if err.stderr.startswith(GFFREAD_ERRORS[0]): # parsing error
-
+                is_parsing_error = err.stderr.startswith(GFFREAD_ERRORS[0])
+                is_improper_coord_error = err.stderr.startswith(GFFREAD_ERRORS[1])
+                if is_parsing_error:
                     # remove all lines related to problem feature
                     gff_line = err.stderr.split('\n')[1]
                     attrs = parse_attributes(gff_line.split('\t')[-1])
                     id = attrs.get("ID")
-
-
-                    with open(gff_path, 'r') as f:
-                        lines = f.readlines()
-                    
-                    feature = find_related_features(lines, id)
-                    lines_to_remove = feature[1]
-
-                    with open(os.path.join(FILTERED_GFFS_FOLDER, filtered_fname), 'w') as f:
-                        for i, line in enumerate(lines):
-                            if i not in range(lines_to_remove[0], lines_to_remove[1] + 1):
-                                f.write(line)
-                    
-                    print(f"Lines {lines_to_remove[0]} to {lines_to_remove[1]} removed from {gff_path}:")
-                    for line_idx in range(lines_to_remove[0], lines_to_remove[1] + 1):
-                        print(f"{lines[line_idx].strip()}")
-                    
-                    features_removed.append(feature[0])
-                elif err.stderr.startswith(GFFREAD_ERRORS[1]): # improper genomic coordinate
-                    print("IMPROPER GENOMIC COORDINATE ERROR")
-
-
-                    return FAILURE_EXIT_CODE
+                elif is_improper_coord_error:
+                    id = err.stderr.split(' ')[-1].strip()
                 else:
                     print("\nError: unable to handle gffread error.")
                     return FAILURE_EXIT_CODE
 
+                feature_removed = filter_gff(gff_path, id, filtered_gff_path)
+                features_removed.append(feature_removed)
+                
         # extract 3'UTRs from transcripts
+        # COMPARE TO ANNOTATED THALIANA??? only a limited number available
         
         # extract X nucleotides from the end of the sequence
         # USE --w-add <N> gffread option
