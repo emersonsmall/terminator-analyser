@@ -26,12 +26,12 @@ def parse_cmd_line_args(args: list[str]) -> list[str]:
     # TODO add cmd line arg for num nucleotides to extract to the right of CS
     # add arg for whether to filter GFFs or not, or set max features allowed to be removed
 
-    input_folder = sys.argv[1]
-    if not os.path.isdir(input_folder):
-        print(f"Error: {input_folder} is not a valid directory.")
+    input_dir = sys.argv[1]
+    if not os.path.isdir(input_dir):
+        print(f"Error: {input_dir} is not a valid directory.")
         return []
     
-    return [input_folder]
+    return [input_dir]
 
 
 def parse_attributes(attributes: str) -> dict[str, str]:
