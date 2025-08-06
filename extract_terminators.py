@@ -1,5 +1,6 @@
 # gffread https://ccb.jhu.edu/software/stringtie/gff.shtml
 # /mnt/c/Users/Emerson/Documents/QUT/2025/EGH400 Local/project-code
+# /mnt/c/Users/emers/Documents/QUT/2025/EGH400 Local/project-code
 
 import os
 import sys
@@ -133,7 +134,7 @@ def find_related_features(gff_lines: list[str], start_id: str) -> tuple[str, lis
     return root_id, sorted(all_idxs)
 
 
-def filter_gff(f_id: str, in_path: str, out_path: str):
+def filter_gff(f_id: str, in_path: str, out_path: str) -> str:
     """
     Filters a GFF file to remove all lines related to a given feature ID.
     Args:
@@ -151,7 +152,7 @@ def filter_gff(f_id: str, in_path: str, out_path: str):
             lines = f.readlines()
     except OSError as e:
         print(f"Error: Could not open input file '{in_path}': {e}")
-        return None
+        raise OSError
     
     root_id, line_idxs = find_related_features(lines, f_id)
     
@@ -162,7 +163,7 @@ def filter_gff(f_id: str, in_path: str, out_path: str):
             f.writelines(lines_to_keep)
     except OSError as e:
         print(f"Error: Could not create/open output file '{out_path}': {e}")
-        return None
+        raise OSError
 
     print(f"{len(line_idxs)} line/s removed from {in_path}:")
     for i in line_idxs:
@@ -171,22 +172,15 @@ def filter_gff(f_id: str, in_path: str, out_path: str):
     return root_id
 
 
-def create_folder(path: str) -> bool:
+def create_folder(path: str) -> None:
     """
-    Creates a folder in the current directory if it does not already exist.
+    Creates a folder at the specified path if it does not already exist.
     Args:
-        name (str): The name of the folder to create.
+        path (str): The path of the folder to create.
     """
-    path = os.path.join(os.getcwd(), path)
     if not os.path.exists(path):
-        try:
-            os.makedirs(path)
-            print(f"Created directory: {path}")
-        except OSError as e:
-            print(f"Error creating directory {path}: {e}")
-            return False
-    
-    return True
+        os.makedirs(path)
+        print(f"Created directory: {path}")
 
 
 def extract_transcripts(in_dir: str, fasta_fname: str, gff_fname: str) -> int:
@@ -251,11 +245,12 @@ def find_files(dir: str) -> list[tuple[str, str]]:
 
 
 def main() -> int:
-    OUT_FOLDER = "out"
-    FILTERED_GFFS_FOLDER = os.path.join(OUT_FOLDER, "filtered_gffs")
-    TRANSCRIPTS_FOLDER = os.path.join(OUT_FOLDER, "gffread_transcripts")
-    TERMINATORS_FOLDER = os.path.join(OUT_FOLDER, "terminators")
-    UTRS_FOLDER = os.path.join(OUT_FOLDER, "3utrs")
+    OUT_DIR = "out"
+    FILTERED_GFFS_DIR = os.path.join(OUT_DIR, "filtered_gffs")
+    TRANSCRIPTS_DIR = os.path.join(OUT_DIR, "gffread_transcripts")
+    TERMINATORS_DIR = os.path.join(OUT_DIR, "terminators")
+    UTRS_DIR = os.path.join(OUT_DIR, "3utrs")
+    ALL_DIRS = (FILTERED_GFFS_DIR, TRANSCRIPTS_DIR, TERMINATORS_DIR, UTRS_DIR)
 
     args = parse_cmd_line_args(sys.argv)
     if not args:
@@ -266,8 +261,12 @@ def main() -> int:
     if not FILES:
         return FAILURE_EXIT_CODE
 
-    if not create_folder(TRANSCRIPTS_FOLDER) or not create_folder(UTRS_FOLDER) or not create_folder(TERMINATORS_FOLDER):
-        return FAILURE_EXIT_CODE
+    for dir in ALL_DIRS:
+        try:
+            create_folder(dir)
+        except OSError as e:
+            print(f"Error creating folder {dir}")
+            return FAILURE_EXIT_CODE
 
     #TODO run in parallel
     n = 1
@@ -278,14 +277,13 @@ def main() -> int:
         print(f"Extracting transcripts for \"{genome}\" with gffread...")
 
         # extract transcripts for every gene with gffread
-        tscript_path = os.path.join(TRANSCRIPTS_FOLDER, genome + "_transcripts.fa")
+        tscript_path = os.path.join(TRANSCRIPTS_DIR, genome + "_transcripts.fa")
         fasta_path = os.path.join(input_dir, fasta)
         gff_path = os.path.join(input_dir, gff)
 
         first_run = True
-        filtered_gff_path = os.path.join(FILTERED_GFFS_FOLDER, genome + "_filtered.gff")
+        filtered_gff_path = os.path.join(FILTERED_GFFS_DIR, genome + "_filtered.gff")
         features_removed: list[str] = []
-        create_folder(FILTERED_GFFS_FOLDER)
 
         for i in range(MAX_GFFREAD_ITERATIONS):
             if first_run:
@@ -328,7 +326,10 @@ def main() -> int:
                     print("\nError: unable to handle gffread error.")
                     return FAILURE_EXIT_CODE
 
-                feature_removed = filter_gff(id, gff_path, filtered_gff_path)
+                try:
+                    feature_removed = filter_gff(id, gff_path, filtered_gff_path)
+                except OSError as e:
+                    return FAILURE_EXIT_CODE
                 features_removed.append(feature_removed)
                 
         # extract 3'UTRs from transcripts
