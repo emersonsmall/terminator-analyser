@@ -10,8 +10,7 @@ import functools
 SUCCESS_EXIT_CODE = 0
 FAILURE_EXIT_CODE = 1
 
-GFFREAD_ERRORS = ("Error parsing", "GffObj::getSpliced() error: improper genomic coordinate")
-MAX_GFFREAD_ITERATIONS = 10
+FILTERED_GFFS_DIR = os.path.join(OUT_DIR, "filtered_gffs")
 
 def parse_cmd_line_args(args: list[str]) -> list[str]:
     """
@@ -147,12 +146,8 @@ def filter_gff(f_id: str, in_path: str, out_path: str) -> str:
     assert os.path.isfile(in_path), f"Input file {in_path} does not exist."
     assert isinstance(f_id, str), f"Feature ID must be a string"
 
-    try:
-        with open(in_path, 'r') as f:
-            lines = f.readlines()
-    except OSError as e:
-        print(f"Error: Could not open input file '{in_path}': {e}")
-        raise OSError
+    with open(in_path, 'r') as f:
+        lines = f.readlines()
     
     root_id, line_idxs = find_related_features(lines, f_id)
     
@@ -183,17 +178,67 @@ def create_folder(path: str) -> None:
         print(f"Created directory: {path}")
 
 
-def extract_transcripts(in_dir: str, fasta_fname: str, gff_fname: str) -> int:
+def extract_transcripts(fasta_path: str, gff_path: str, out_path: str) -> None:
     """
-    Extracts transcripts using gffread.
-    Returns:
-        int: SUCCESS_EXIT_CODE if successful, FAILURE_EXIT_CODE otherwise.
+    Extracts transcripts for the specified fasta file and gff file using gffread.
     """
-    assert os.path.isdir(in_dir), f"Input folder {in_dir} does not exist or is not a directory."
-    assert os.path.isfile(fasta_fname), f"FASTA file {fasta_fname} does not exist."
-    assert os.path.isfile(gff_fname), f"GFF file {gff_fname} does not exist."
+    assert os.path.isfile(fasta_path), f"FASTA file {fasta_path} does not exist."
+    assert os.path.isfile(gff_path), f"GFF file {gff_path} does not exist."
 
-    return SUCCESS_EXIT_CODE
+    GFFREAD_ERRORS = ("Error parsing", "GffObj::getSpliced() error: improper genomic coordinate")
+    MAX_GFFREAD_ITERATIONS = 10
+
+    first_run = True
+    filtered_gff_path = os.path.join(FILTERED_GFFS_DIR, genome + "_filtered.gff")
+    features_removed: list[str] = []
+
+    for i in range(MAX_GFFREAD_ITERATIONS):
+        if first_run:
+            first_run = False
+        else:
+            print(f"\nRe-running gffread with {filtered_gff_path}...")
+            gff_path = filtered_gff_path
+
+        try:
+            subprocess.run(
+                [
+                    "gffread",
+                    "-w", out_path, 
+                    "-g", fasta_path, 
+                    gff_path
+                ],
+                capture_output=True, 
+                text=True, 
+                check=True)
+            
+            print(f"Transcripts successfully extracted to {out_path}")
+
+            if features_removed:
+                print(f"Features removed from \"{genome}\":\n{'\n'.join(features_removed)}")
+            
+            break
+        except subprocess.CalledProcessError as err:
+            print(err.stderr)
+
+            is_parsing_error = err.stderr.startswith(GFFREAD_ERRORS[0])
+            is_improper_coord_error = err.stderr.startswith(GFFREAD_ERRORS[1])
+            if is_parsing_error:
+                # remove all lines related to problem feature
+                gff_line = err.stderr.split('\n')[1]
+                attrs = parse_attributes(gff_line.split('\t')[-1])
+                id = attrs.get("ID")
+            elif is_improper_coord_error:
+                id = err.stderr.split(' ')[-1].strip()
+            else:
+                print("\nError: unable to handle gffread error.")
+                raise Exception
+
+            try:
+                feature_removed = filter_gff(id, gff_path, filtered_gff_path)
+            except OSError as e:
+                print(f"Error: {e}")
+                raise Exception
+            features_removed.append(feature_removed)
 
 
 def extract_3utrs() -> int:
@@ -246,7 +291,6 @@ def find_files(dir: str) -> list[tuple[str, str]]:
 
 def main() -> int:
     OUT_DIR = "out"
-    FILTERED_GFFS_DIR = os.path.join(OUT_DIR, "filtered_gffs")
     TRANSCRIPTS_DIR = os.path.join(OUT_DIR, "gffread_transcripts")
     TERMINATORS_DIR = os.path.join(OUT_DIR, "terminators")
     UTRS_DIR = os.path.join(OUT_DIR, "3utrs")
@@ -276,61 +320,15 @@ def main() -> int:
 
         print(f"Extracting transcripts for \"{genome}\" with gffread...")
 
-        # extract transcripts for every gene with gffread
         tscript_path = os.path.join(TRANSCRIPTS_DIR, genome + "_transcripts.fa")
         fasta_path = os.path.join(input_dir, fasta)
         gff_path = os.path.join(input_dir, gff)
 
-        first_run = True
-        filtered_gff_path = os.path.join(FILTERED_GFFS_DIR, genome + "_filtered.gff")
-        features_removed: list[str] = []
-
-        for i in range(MAX_GFFREAD_ITERATIONS):
-            if first_run:
-                first_run = False
-            else:
-                print(f"\nRe-running gffread with {filtered_gff_path}...")
-                gff_path = filtered_gff_path
-
-            try:
-                subprocess.run(
-                    [
-                        "gffread",
-                        "-w", tscript_path, 
-                        "-g", fasta_path, 
-                        gff_path
-                    ],
-                    capture_output=True, 
-                    text=True, 
-                    check=True)
-                
-                print(f"Transcripts successfully extracted to {tscript_path}")
-
-                if features_removed:
-                    print(f"Features removed from \"{genome}\":\n{'\n'.join(features_removed)}")
-                
-                break
-            except subprocess.CalledProcessError as err:
-                print(err.stderr)
-
-                is_parsing_error = err.stderr.startswith(GFFREAD_ERRORS[0])
-                is_improper_coord_error = err.stderr.startswith(GFFREAD_ERRORS[1])
-                if is_parsing_error:
-                    # remove all lines related to problem feature
-                    gff_line = err.stderr.split('\n')[1]
-                    attrs = parse_attributes(gff_line.split('\t')[-1])
-                    id = attrs.get("ID")
-                elif is_improper_coord_error:
-                    id = err.stderr.split(' ')[-1].strip()
-                else:
-                    print("\nError: unable to handle gffread error.")
-                    return FAILURE_EXIT_CODE
-
-                try:
-                    feature_removed = filter_gff(id, gff_path, filtered_gff_path)
-                except OSError as e:
-                    return FAILURE_EXIT_CODE
-                features_removed.append(feature_removed)
+        try:
+            extract_transcripts(fasta_path, gff_path, tscript_path)
+        except Exception as e:
+            print(f"Error: {e}")
+            return FAILURE_EXIT_CODE
                 
         # extract 3'UTRs from transcripts
         # COMPARE TO ANNOTATED THALIANA??? only a limited number available
