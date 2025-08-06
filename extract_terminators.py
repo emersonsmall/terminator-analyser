@@ -1,18 +1,17 @@
 # gffread https://ccb.jhu.edu/software/stringtie/gff.shtml
-# /mnt/c/Users/Emerson/Documents/QUT/2025/EGH400 Local/project-code
-# /mnt/c/Users/emers/Documents/QUT/2025/EGH400 Local/project-code
+# DESKTOP: /mnt/c/Users/Emerson/Documents/QUT/2025/EGH400 Local/project-code
+# LAPTOP: /mnt/c/Users/emers/Documents/QUT/2025/EGH400 Local/project-code
 
 import os
 import sys
 import subprocess
 import functools
 
-SUCCESS_EXIT_CODE = 0
-FAILURE_EXIT_CODE = 1
+# GLOBALS
+OUT_DIR = "out"
 
-FILTERED_GFFS_DIR = os.path.join(OUT_DIR, "filtered_gffs")
 
-def parse_cmd_line_args(args: list[str]) -> list[str]:
+def parse_cmd_line_args() -> list[str]:
     """
     Parses command line arguments.
     """
@@ -60,13 +59,15 @@ def build_feature_map(gff_lines: list[str]) -> dict[str, list[dict[str, int | st
         dict[str, list[dict[str, int | str | None]]]: A dictionary mapping each feature ID to a list of
         dictionaries, where each dictionary represents a line with said feature ID.
     """
+    assert isinstance(gff_lines, list), f"Invalid type for parameter 'gff_lines'"
+
     feature_map = {}
     for i, line in enumerate(gff_lines):
         if line.startswith('#') or not line.strip():
             continue # skip comments and blank lines
 
         try:
-            # 9th column contains attributes string
+            # 9th column contains attribute string
             attrs = parse_attributes(line.split('\t')[8])
             f_id = attrs.get("ID")
 
@@ -97,6 +98,9 @@ def find_related_features(gff_lines: list[str], start_id: str) -> tuple[str, lis
         tuple[str, list[int]]: The 1st element is the root id of the feature, and the 2nd element is a list containing 
                                the line indices of the lines related to the feature.
     """
+    assert isinstance(gff_lines, list), f"Invalid type for parameter 'gff_lines'"
+    assert isinstance(start_id, str), f"Invalid type for parameter 'start_id'"
+
     feature_map = build_feature_map(gff_lines)
 
     if start_id not in feature_map:
@@ -144,7 +148,8 @@ def filter_gff(f_id: str, in_path: str, out_path: str) -> str:
         str: The root ID (top-level feature ID - i.e., gene ID) of the removed feature.
     """
     assert os.path.isfile(in_path), f"Input file {in_path} does not exist."
-    assert isinstance(f_id, str), f"Feature ID must be a string"
+    assert isinstance(f_id, str), f"Invalid type for parameter 'f_id'"
+    assert isinstance(out_path, str), f"Invalid type for parameter 'out_path'"
 
     with open(in_path, 'r') as f:
         lines = f.readlines()
@@ -157,7 +162,7 @@ def filter_gff(f_id: str, in_path: str, out_path: str) -> str:
         with open(out_path, 'w') as f:
             f.writelines(lines_to_keep)
     except OSError as e:
-        print(f"Error: Could not create/open output file '{out_path}': {e}")
+        print(f"Error: Could not create/open output file \"{out_path}\": {e}")
         raise OSError
 
     print(f"{len(line_idxs)} line/s removed from {in_path}:")
@@ -173,6 +178,8 @@ def create_folder(path: str) -> None:
     Args:
         path (str): The path of the folder to create.
     """
+    assert isinstance(path, str), f"Invalid type for parameter 'path'"
+
     if not os.path.exists(path):
         os.makedirs(path)
         print(f"Created directory: {path}")
@@ -184,19 +191,22 @@ def extract_transcripts(fasta_path: str, gff_path: str, out_path: str) -> None:
     """
     assert os.path.isfile(fasta_path), f"FASTA file {fasta_path} does not exist."
     assert os.path.isfile(gff_path), f"GFF file {gff_path} does not exist."
+    assert isinstance(out_path, str), f"Invalid type for parameter 'out_path'"
 
     GFFREAD_ERRORS = ("Error parsing", "GffObj::getSpliced() error: improper genomic coordinate")
     MAX_GFFREAD_ITERATIONS = 10
+    FILTERED_GFFS_DIR = os.path.join(OUT_DIR, "filtered_gffs")
+    
+    genome = os.path.basename(fasta_path).split('.')[0]
+    fname = genome + "_filtered.gff"
 
-    first_run = True
-    filtered_gff_path = os.path.join(FILTERED_GFFS_DIR, genome + "_filtered.gff")
+    filtered_gff_path = os.path.join(FILTERED_GFFS_DIR, fname)
     features_removed: list[str] = []
 
     for i in range(MAX_GFFREAD_ITERATIONS):
-        if first_run:
-            first_run = False
-        else:
-            print(f"\nRe-running gffread with {filtered_gff_path}...")
+        if i > 0:
+            print(f"\nRe-running gffread with \"{fname}\"...")
+        if i == 1:
             gff_path = filtered_gff_path
 
         try:
@@ -211,7 +221,7 @@ def extract_transcripts(fasta_path: str, gff_path: str, out_path: str) -> None:
                 text=True, 
                 check=True)
             
-            print(f"Transcripts successfully extracted to {out_path}")
+            print(f"Transcripts successfully extracted to \"{out_path}\"")
 
             if features_removed:
                 print(f"Features removed from \"{genome}\":\n{'\n'.join(features_removed)}")
@@ -234,21 +244,22 @@ def extract_transcripts(fasta_path: str, gff_path: str, out_path: str) -> None:
                 raise Exception
 
             try:
+                if not os.path.isfile(filtered_gff_path):
+                    create_folder(FILTERED_GFFS_DIR)
                 feature_removed = filter_gff(id, gff_path, filtered_gff_path)
             except OSError as e:
                 print(f"Error: {e}")
                 raise Exception
+            
             features_removed.append(feature_removed)
 
 
-def extract_3utrs() -> int:
+def extract_3utrs():
     """
-    Extracts 3' UTRs from transcripts.
-    Returns:
-        int: SUCCESS_EXIT_CODE if successful, FAILURE_EXIT_CODE otherwise.
+    
     """
     # TODO implement this function
-    return SUCCESS_EXIT_CODE
+    pass
 
 
 def find_files(dir: str) -> list[tuple[str, str]]:
@@ -265,8 +276,8 @@ def find_files(dir: str) -> list[tuple[str, str]]:
     GFF_EXTENSIONS = ("gff", "gff3")
 
     # iterate through all files in the input folder
-    fasta_files = []
-    gff_files = []
+    fasta_files: list[str] = []
+    gff_files: list[str] = []
     for file in os.listdir(dir):
         file_ext = file.split('.')[-1]
         if file_ext in FASTA_EXTENSIONS:
@@ -277,40 +288,41 @@ def find_files(dir: str) -> list[tuple[str, str]]:
     if len(fasta_files) != len(gff_files):
         print("Error: The number of fasta files and gff files must match.")
         return []
-    
-    files = []
-    for i in range(len(fasta_files)):
-        if fasta_files[i].split('.')[0] != gff_files[i].split('.')[0]:
-            print(f"Error: Mismatched fasta and gff filenames: {fasta_files[i]} and {gff_files[i]}")
-            files = []
-            break
-        files.append((fasta_files[i], gff_files[i]))
+
+    files = list(zip(fasta_files, gff_files))
+    for fasta, gff in files:
+        if fasta.split('.')[0] != gff.split('.')[0]:
+            print(f"Error: Mismatched filenames: {fasta} and {gff}")
+            return []
 
     return files
 
 
 def main() -> int:
-    OUT_DIR = "out"
+    EXIT_SUCCESS = 0
+    EXIT_FAILURE = 1
+
     TRANSCRIPTS_DIR = os.path.join(OUT_DIR, "gffread_transcripts")
     TERMINATORS_DIR = os.path.join(OUT_DIR, "terminators")
     UTRS_DIR = os.path.join(OUT_DIR, "3utrs")
-    ALL_DIRS = (FILTERED_GFFS_DIR, TRANSCRIPTS_DIR, TERMINATORS_DIR, UTRS_DIR)
+    DIRS = (TRANSCRIPTS_DIR, TERMINATORS_DIR, UTRS_DIR)
 
-    args = parse_cmd_line_args(sys.argv)
+    args = parse_cmd_line_args()
     if not args:
-        return FAILURE_EXIT_CODE
+        return EXIT_FAILURE
     input_dir = args[0]
 
     FILES = find_files(input_dir)
     if not FILES:
-        return FAILURE_EXIT_CODE
+        print(f"Error: No valid fasta or gff files found in {input_dir}.")
+        return EXIT_FAILURE
 
-    for dir in ALL_DIRS:
+    for dir in DIRS:
         try:
             create_folder(dir)
         except OSError as e:
             print(f"Error creating folder {dir}")
-            return FAILURE_EXIT_CODE
+            return EXIT_FAILURE
 
     #TODO run in parallel
     n = 1
@@ -328,7 +340,7 @@ def main() -> int:
             extract_transcripts(fasta_path, gff_path, tscript_path)
         except Exception as e:
             print(f"Error: {e}")
-            return FAILURE_EXIT_CODE
+            return EXIT_FAILURE
                 
         # extract 3'UTRs from transcripts
         # COMPARE TO ANNOTATED THALIANA??? only a limited number available
@@ -342,7 +354,7 @@ def main() -> int:
         n += 1
     
     print("Finished")
-    return SUCCESS_EXIT_CODE
+    return EXIT_SUCCESS
 
 
 if __name__ == "__main__":
