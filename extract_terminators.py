@@ -6,10 +6,14 @@ import os
 import sys
 import subprocess
 import functools
+import concurrent.futures
 
 # GLOBALS
 OUT_DIR = "out"
+TRANSCRIPTS_DIR = os.path.join(OUT_DIR, "gffread_transcripts")
 
+EXIT_SUCCESS = 0
+EXIT_FAILURE = 1
 
 def parse_cmd_line_args() -> list[str]:
     """
@@ -254,12 +258,38 @@ def extract_transcripts(fasta_path: str, gff_path: str, out_path: str) -> None:
             features_removed.append(feature_removed)
 
 
-def extract_3utrs():
+def process_genome(file_pair, n, num_genomes, input_dir):
     """
-    
+    Processes a single genome.
+    Args:
+        file_pair (tuple[str, str]): A tuple containing the fasta and gff filenames.
+        n (int): The current genome number being processed.
+        num_genomes (int): The total number of genomes to process.
+        input_dir (str): The path to the input directory containing fasta and gff files.
     """
-    # TODO implement this function
-    pass
+    fasta, gff = file_pair
+    genome = fasta.split('.')[0]
+
+    print(f"\nProcessing genome \"{genome}\" ({n} of {num_genomes})...")
+    print(f"Extracting transcripts for \"{genome}\" with gffread...")
+
+    tscript_path = os.path.join(TRANSCRIPTS_DIR, genome + "_transcripts.fa")
+    fasta_path = os.path.join(input_dir, fasta)
+    gff_path = os.path.join(input_dir, gff)
+
+    try:
+        extract_transcripts(fasta_path, gff_path, tscript_path)
+        # extract 3'UTRs from transcripts
+        # COMPARE TO ANNOTATED THALIANA??? only a limited number available
+        
+        # extract X nucleotides from the end of the sequence
+        # USE --w-add <N> gffread option
+
+        # add to 3'UTR to form full terminator
+
+        return EXIT_SUCCESS
+    except Exception:
+        return EXIT_FAILURE
 
 
 def find_files(dir: str) -> list[tuple[str, str]]:
@@ -298,15 +328,15 @@ def find_files(dir: str) -> list[tuple[str, str]]:
     return files
 
 
+def extract_3utrs():
+    """
+    
+    """
+    # TODO implement
+    pass
+
+
 def main() -> int:
-    EXIT_SUCCESS = 0
-    EXIT_FAILURE = 1
-
-    TRANSCRIPTS_DIR = os.path.join(OUT_DIR, "gffread_transcripts")
-    TERMINATORS_DIR = os.path.join(OUT_DIR, "terminators")
-    UTRS_DIR = os.path.join(OUT_DIR, "3utrs")
-    DIRS = (TRANSCRIPTS_DIR, TERMINATORS_DIR, UTRS_DIR)
-
     args = parse_cmd_line_args()
     if not args:
         return EXIT_FAILURE
@@ -317,6 +347,9 @@ def main() -> int:
         print(f"Error: No valid fasta or gff files found in {input_dir}.")
         return EXIT_FAILURE
 
+    TERMINATORS_DIR = os.path.join(OUT_DIR, "terminators")
+    UTRS_DIR = os.path.join(OUT_DIR, "3utrs")
+    DIRS = (TRANSCRIPTS_DIR, TERMINATORS_DIR, UTRS_DIR)
     for dir in DIRS:
         try:
             create_folder(dir)
@@ -324,36 +357,21 @@ def main() -> int:
             print(f"Error creating folder {dir}")
             return EXIT_FAILURE
 
-    #TODO run in parallel
-    n = 1
-    for fasta, gff in FILES:
-        genome = fasta.split('.')[0]
-        print(f"\nProcessing genome \"{genome}\" ({n} of {len(FILES)})...")
+    worker_func = functools.partial(
+        process_genome,
+        num_genomes=len(FILES),
+        input_dir=input_dir,
+    )
 
-        print(f"Extracting transcripts for \"{genome}\" with gffread...")
+    with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
+        results = executor.map(worker_func, FILES, range(1, len(FILES) + 1))
 
-        tscript_path = os.path.join(TRANSCRIPTS_DIR, genome + "_transcripts.fa")
-        fasta_path = os.path.join(input_dir, fasta)
-        gff_path = os.path.join(input_dir, gff)
-
-        try:
-            extract_transcripts(fasta_path, gff_path, tscript_path)
-        except Exception as e:
-            print(f"Error: {e}")
-            return EXIT_FAILURE
-                
-        # extract 3'UTRs from transcripts
-        # COMPARE TO ANNOTATED THALIANA??? only a limited number available
-        
-        # extract X nucleotides from the end of the sequence
-        # USE --w-add <N> gffread option
-
-        # add to 3'UTR to form full terminator
-
-
-        n += 1
+        for result in results:
+            if result == EXIT_FAILURE:
+                print("Error: One or more genomes failed to process.")
+                return EXIT_FAILURE
     
-    print("Finished")
+    print("\nFinished")
     return EXIT_SUCCESS
 
 
