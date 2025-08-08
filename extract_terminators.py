@@ -3,7 +3,8 @@
 # LAPTOP: /mnt/c/Users/emers/Documents/QUT/2025/EGH400 Local/project-code
 
 # TODO: handle interrupt signals (ctrl+c, sigterm etc) gracefully
-# TODO: replace gffread with a python library (e.g. gffutils, pybedtools, BioPython)?
+# TODO: replace gffread with a python library?? (e.g. gffutils, pybedtools, BioPython) these may have more robust parsing and would make the code cleaner
+# would need to verify if they have the same functionality as gffread
 
 import os
 import sys
@@ -12,9 +13,9 @@ import functools
 import concurrent.futures
 
 # GLOBALS
-OUT_DIR = "out"
-EXIT_SUCCESS = 0
-EXIT_FAILURE = 1
+OUT_DIR: str = "out"
+EXIT_SUCCESS: int = 0
+EXIT_FAILURE: int = 1
 
 def parse_cmd_line_args() -> list[str]:
     """
@@ -26,8 +27,13 @@ def parse_cmd_line_args() -> list[str]:
         print(f"Usage: {sys.argv[0]} <path to input folder>")
         return []
     
-    # TODO add cmd line arg for num nucleotides to extract to the right of CS
-    # add arg for whether to filter GFFs or not, or set max features allowed to be removed
+    # TODO: add args:
+    # num nucleotides to extract to the right of CS (default 50)
+    # whether to filter GFFs (default True)
+    # max features allowed to be removed when filtering GFFs (default 10)
+    # whether to extract 3'UTRs separately (default False)
+    # whether to buffer terminators so that they are all the same length (default False)
+    # 
 
     input_dir = sys.argv[1]
     if not os.path.isdir(input_dir):
@@ -286,10 +292,10 @@ def process_genome(file_pair, n, num_genomes):
     try:
         extract_transcripts(fasta, gff, tscript_path)
         # extract 3'UTRs from transcripts
-        # COMPARE TO ANNOTATED THALIANA??? only a limited number available
+        # COMPARE TO ANNOTATED THALIANA only a limited number available
         
         # extract X nucleotides from the end of the sequence
-        # USE --w-add <N> gffread option TRANSCRIPTS WILL CHANGE???
+        # USE --w-add <N> option. this modifies CDS= accordingly, can find 3'UTR by subtracting from the end
 
         # add to 3'UTR to form full terminator
 
@@ -338,12 +344,13 @@ def find_files(dir: str) -> list[tuple[str, str]]:
     return files
 
 
-def extract_3utrs():
+def extract_3utrs(fasta_path: str, out_path: str) -> None:
     """
     
     """
-    # TODO implement
-    pass
+    assert os.path.isfile(fasta_path), f"FASTA file {fasta_path} does not exist."
+    assert isinstance(out_path, str), f"Invalid type for parameter 'out_path'"
+    
 
 
 def main() -> int:
