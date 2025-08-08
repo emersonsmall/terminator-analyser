@@ -2,6 +2,9 @@
 # DESKTOP: /mnt/c/Users/Emerson/Documents/QUT/2025/EGH400 Local/project-code
 # LAPTOP: /mnt/c/Users/emers/Documents/QUT/2025/EGH400 Local/project-code
 
+# TODO: handle interrupt signals (ctrl+c, sigterm etc) gracefully
+# TODO: replace gffread with a python library (e.g. gffutils, pybedtools, BioPython)?
+
 import os
 import sys
 import subprocess
@@ -10,8 +13,6 @@ import concurrent.futures
 
 # GLOBALS
 OUT_DIR = "out"
-TRANSCRIPTS_DIR = os.path.join(OUT_DIR, "gffread_transcripts")
-
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
 
@@ -19,9 +20,9 @@ def parse_cmd_line_args() -> list[str]:
     """
     Parses command line arguments.
     """
-    MIN_CMD_LINE_ARGS = 1 # path to input folder
+    MIN_NUM_ARGS = 1 # path to input folder
 
-    if len(sys.argv) != MIN_CMD_LINE_ARGS + 1:
+    if len(sys.argv) != MIN_NUM_ARGS + 1:
         print(f"Usage: {sys.argv[0]} <path to input folder>")
         return []
     
@@ -30,7 +31,7 @@ def parse_cmd_line_args() -> list[str]:
 
     input_dir = sys.argv[1]
     if not os.path.isdir(input_dir):
-        print(f"Error: {input_dir} is not a valid directory.")
+        print(f"Folder \"{input_dir}\" does not exist or is not a directory.")
         return []
     
     return [input_dir]
@@ -145,11 +146,11 @@ def filter_gff(f_id: str, in_path: str, out_path: str) -> str:
     """
     Filters a GFF file to remove all lines related to a given feature ID.
     Args:
+        f_id (str): The ID of the feature to remove.
         in_path (str): The path to the input GFF file.
-        f_id (str): The ID of the feature to filter out.
         out_path (str): The path to the output GFF file.
     Returns:
-        str: The root ID (top-level feature ID - i.e., gene ID) of the removed feature.
+        str: The root ID (top-level feature ID i.e., gene ID) of the removed feature.
     """
     assert os.path.isfile(in_path), f"Input file {in_path} does not exist."
     assert isinstance(f_id, str), f"Invalid type for parameter 'f_id'"
@@ -191,25 +192,25 @@ def create_folder(path: str) -> None:
 
 def extract_transcripts(fasta_path: str, gff_path: str, out_path: str) -> None:
     """
-    Extracts transcripts for the specified fasta file and gff file using gffread.
+    Extracts transcripts for the specified fasta file and gff file.
     """
     assert os.path.isfile(fasta_path), f"FASTA file {fasta_path} does not exist."
     assert os.path.isfile(gff_path), f"GFF file {gff_path} does not exist."
     assert isinstance(out_path, str), f"Invalid type for parameter 'out_path'"
 
     GFFREAD_ERRORS = ("Error parsing", "GffObj::getSpliced() error: improper genomic coordinate")
-    MAX_GFFREAD_ITERATIONS = 10
+    MAX_ITERATIONS = 10
     FILTERED_GFFS_DIR = os.path.join(OUT_DIR, "filtered_gffs")
-    
-    genome = os.path.basename(fasta_path).split('.')[0]
-    fname = genome + "_filtered.gff"
 
-    filtered_gff_path = os.path.join(FILTERED_GFFS_DIR, fname)
+    name = os.path.basename(fasta_path).split('.')[0]
+    filtered_name = name + "_filtered.gff"
+
+    filtered_gff_path = os.path.join(FILTERED_GFFS_DIR, filtered_name)
     features_removed: list[str] = []
 
-    for i in range(MAX_GFFREAD_ITERATIONS):
+    for i in range(MAX_ITERATIONS):
         if i > 0:
-            print(f"\nRe-running gffread with \"{fname}\"...")
+            print(f"\nRe-running gffread with \"{filtered_name}\"...")
         if i == 1:
             gff_path = filtered_gff_path
 
@@ -217,8 +218,8 @@ def extract_transcripts(fasta_path: str, gff_path: str, out_path: str) -> None:
             subprocess.run(
                 [
                     "gffread",
-                    "-w", out_path, 
-                    "-g", fasta_path, 
+                    "-w", out_path,
+                    "-g", fasta_path,
                     gff_path
                 ],
                 capture_output=True, 
@@ -228,16 +229,17 @@ def extract_transcripts(fasta_path: str, gff_path: str, out_path: str) -> None:
             print(f"Transcripts successfully extracted to \"{out_path}\"")
 
             if features_removed:
-                print(f"Features removed from \"{genome}\":\n{'\n'.join(features_removed)}")
+                print(f"Features removed from \"{name}\":\n{'\n'.join(features_removed)}")
             
             break
         except subprocess.CalledProcessError as err:
+            print(f"\nError running gffread for {name}:")
             print(err.stderr)
 
             is_parsing_error = err.stderr.startswith(GFFREAD_ERRORS[0])
             is_improper_coord_error = err.stderr.startswith(GFFREAD_ERRORS[1])
+
             if is_parsing_error:
-                # remove all lines related to problem feature
                 gff_line = err.stderr.split('\n')[1]
                 attrs = parse_attributes(gff_line.split('\t')[-1])
                 id = attrs.get("ID")
@@ -248,8 +250,7 @@ def extract_transcripts(fasta_path: str, gff_path: str, out_path: str) -> None:
                 raise Exception
 
             try:
-                if not os.path.isfile(filtered_gff_path):
-                    create_folder(FILTERED_GFFS_DIR)
+                create_folder(FILTERED_GFFS_DIR)
                 feature_removed = filter_gff(id, gff_path, filtered_gff_path)
             except OSError as e:
                 print(f"Error: {e}")
@@ -258,32 +259,37 @@ def extract_transcripts(fasta_path: str, gff_path: str, out_path: str) -> None:
             features_removed.append(feature_removed)
 
 
-def process_genome(file_pair, n, num_genomes, input_dir):
+def process_genome(file_pair, n, num_genomes):
     """
     Processes a single genome.
     Args:
-        file_pair (tuple[str, str]): A tuple containing the fasta and gff filenames.
+        file_pair (tuple[str, str]): A tuple containing the fasta and gff file paths for a single genome.
         n (int): The current genome number being processed.
         num_genomes (int): The total number of genomes to process.
-        input_dir (str): The path to the input directory containing fasta and gff files.
     """
     fasta, gff = file_pair
-    genome = fasta.split('.')[0]
+    name = os.path.basename(fasta).split('.')[0]
 
-    print(f"\nProcessing genome \"{genome}\" ({n} of {num_genomes})...")
-    print(f"Extracting transcripts for \"{genome}\" with gffread...")
+    print(f"\nProcessing genome \"{name}\" ({n} of {num_genomes})...")
+    print(f"Extracting transcripts for \"{name}\"...")
 
-    tscript_path = os.path.join(TRANSCRIPTS_DIR, genome + "_transcripts.fa")
-    fasta_path = os.path.join(input_dir, fasta)
-    gff_path = os.path.join(input_dir, gff)
+    TRANSCRIPTS_DIR = os.path.join(OUT_DIR, "transcripts")
+    
+    try:
+        create_folder(TRANSCRIPTS_DIR)
+    except OSError as e:
+        print(f"Error creating folder {TRANSCRIPTS_DIR}")
+        return
+
+    tscript_path = os.path.join(TRANSCRIPTS_DIR, name + "_transcripts.fa")
 
     try:
-        extract_transcripts(fasta_path, gff_path, tscript_path)
+        extract_transcripts(fasta, gff, tscript_path)
         # extract 3'UTRs from transcripts
         # COMPARE TO ANNOTATED THALIANA??? only a limited number available
         
         # extract X nucleotides from the end of the sequence
-        # USE --w-add <N> gffread option
+        # USE --w-add <N> gffread option TRANSCRIPTS WILL CHANGE???
 
         # add to 3'UTR to form full terminator
 
@@ -294,13 +300,13 @@ def process_genome(file_pair, n, num_genomes, input_dir):
 
 def find_files(dir: str) -> list[tuple[str, str]]:
     """
-    Searches the given directory for fasta and gff files and enforces gffread requirements.
+    Searches the given directory for valid fasta and gff files.
     Args:
         dir (str): The path to the directory to search.
     Returns:
-        list[tuple[str, str]]: A list of tuples, where each tuple is a pair of a fasta and gff filenames
+        list[tuple[str, str]]: A list of tuples, where each tuple is a pair of fasta and gff file paths.
     """
-    assert os.path.isdir(dir), f"Folder {dir} does not exist or is not a directory."
+    assert os.path.isdir(dir), f"Folder \"{dir}\" does not exist or is not a directory."
 
     FASTA_EXTENSIONS = ("fasta", "fas", "fa", "fna", "ffn", "faa", "mpfa", "frn")
     GFF_EXTENSIONS = ("gff", "gff3")
@@ -309,7 +315,7 @@ def find_files(dir: str) -> list[tuple[str, str]]:
     fasta_files: list[str] = []
     gff_files: list[str] = []
     for file in os.listdir(dir):
-        file_ext = file.split('.')[-1]
+        file_ext = file.split('.')[-1].lower()
         if file_ext in FASTA_EXTENSIONS:
             fasta_files.append(file)
         elif file_ext in GFF_EXTENSIONS:
@@ -320,10 +326,14 @@ def find_files(dir: str) -> list[tuple[str, str]]:
         return []
 
     files = list(zip(fasta_files, gff_files))
+    i = 0
     for fasta, gff in files:
         if fasta.split('.')[0] != gff.split('.')[0]:
             print(f"Error: Mismatched filenames: {fasta} and {gff}")
             return []
+        else:
+            files[i] = (os.path.join(dir, fasta), os.path.join(dir, gff))
+        i += 1
 
     return files
 
@@ -349,7 +359,7 @@ def main() -> int:
 
     TERMINATORS_DIR = os.path.join(OUT_DIR, "terminators")
     UTRS_DIR = os.path.join(OUT_DIR, "3utrs")
-    DIRS = (TRANSCRIPTS_DIR, TERMINATORS_DIR, UTRS_DIR)
+    DIRS = (TERMINATORS_DIR, UTRS_DIR)
     for dir in DIRS:
         try:
             create_folder(dir)
@@ -357,12 +367,13 @@ def main() -> int:
             print(f"Error creating folder {dir}")
             return EXIT_FAILURE
 
+    # set up worker function for multiprocessing
     worker_func = functools.partial(
         process_genome,
         num_genomes=len(FILES),
-        input_dir=input_dir,
     )
 
+    # process each genome in parallel
     with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
         results = executor.map(worker_func, FILES, range(1, len(FILES) + 1))
 
