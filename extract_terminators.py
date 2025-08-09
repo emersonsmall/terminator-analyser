@@ -2,45 +2,62 @@
 # DESKTOP: /mnt/c/Users/Emerson/Documents/QUT/2025/EGH400 Local/project-code
 # LAPTOP: /mnt/c/Users/emers/Documents/QUT/2025/EGH400 Local/project-code
 
-# TODO: handle interrupt signals (ctrl+c, sigterm etc) gracefully
-# TODO: replace gffread with a python library?? (e.g. gffutils, pybedtools, BioPython) these may have more robust parsing and would make the code cleaner
-# would need to verify if they have the same functionality as gffread
+# TODO: replace gffread with a python library (e.g. gffutils, pybedtools, BioPython) these may have more robust parsing and would make the code cleaner
+# need to verify they have the same functionality
 
 import os
 import sys
 import subprocess
 import functools
 import concurrent.futures
+import argparse
 
 # GLOBALS
-OUT_DIR: str = "out"
 EXIT_SUCCESS: int = 0
 EXIT_FAILURE: int = 1
 
-def parse_cmd_line_args() -> list[str]:
+def parse_cmd_line_args() -> argparse.Namespace:
     """
-    Parses command line arguments.
+    Parses command line arguments using argparse.
     """
-    MIN_NUM_ARGS = 1 # path to input folder
+    parser = argparse.ArgumentParser(
+        description="Extract terminators from GFF files and their corresponding FASTA files."
+    )
+    parser.add_argument("input_dir", help="Path to the input folder containing FASTA and GFF files.")
+    parser.add_argument(
+        "--filter",
+        action="store_true",
+        help="Enable filtering of GFF files if gffread encounters errors (default: False)."
+    )
+    parser.add_argument(
+        "--max-features",
+        type=int,
+        default=10,
+        help="Maximum number of features allowed to be removed when filtering GFFs (default: 10)."
+    )
+    parser.add_argument(
+        "--downstream-nucleotides",
+        type=int,
+        default=50,
+        help="Number of nucleotides to extract downstream of the terminator (default: 50)."
+    )
+    parser.add_argument(
+        "--separate-3utrs",
+        action="store_true",
+        help="Extract 3' UTRs separately (default: False)."
+    )
+    parser.add_argument(
+        "--equal-length",
+        action="store_true",
+        help="Buffer terminator sequences so that they are all the same length (default: False)."
+    )
 
-    if len(sys.argv) != MIN_NUM_ARGS + 1:
-        print(f"Usage: {sys.argv[0]} <path to input folder>")
-        return []
-    
-    # TODO: add args:
-    # num nucleotides to extract to the right of CS (default 50)
-    # whether to filter GFFs (default True)
-    # max features allowed to be removed when filtering GFFs (default 10)
-    # whether to extract 3'UTRs separately (default False)
-    # whether to buffer terminators so that they are all the same length (default False)
-    # 
+    args = parser.parse_args()
 
-    input_dir = sys.argv[1]
-    if not os.path.isdir(input_dir):
-        print(f"Folder \"{input_dir}\" does not exist or is not a directory.")
-        return []
+    if not os.path.isdir(args.input_dir):
+        parser.error(f"Input directory '{args.input_dir}' does not exist or is not a directory.")
     
-    return [input_dir]
+    return args
 
 
 def parse_attributes(attributes: str) -> dict[str, str]:
@@ -206,7 +223,6 @@ def extract_transcripts(fasta_path: str, gff_path: str, out_path: str) -> None:
 
     GFFREAD_ERRORS = ("Error parsing", "GffObj::getSpliced() error: improper genomic coordinate")
     MAX_ITERATIONS = 10
-    FILTERED_GFFS_DIR = os.path.join(OUT_DIR, "filtered_gffs")
 
     name = os.path.basename(fasta_path).split('.')[0]
     filtered_name = name + "_filtered.gff"
@@ -265,7 +281,7 @@ def extract_transcripts(fasta_path: str, gff_path: str, out_path: str) -> None:
             features_removed.append(feature_removed)
 
 
-def process_genome(file_pair, n, num_genomes):
+def process_genome(file_pair: tuple[str, str], n: int, num_genomes: int, transcripts_dir: str) -> None:
     """
     Processes a single genome.
     Args:
@@ -273,35 +289,29 @@ def process_genome(file_pair, n, num_genomes):
         n (int): The current genome number being processed.
         num_genomes (int): The total number of genomes to process.
     """
+    assert isinstance(file_pair, tuple), f"Invalid type for parameter 'file_pair'"
+    assert len(file_pair) == 2, f"Invalid length for parameter 'file_pair', expected 2 elements."
+    assert isinstance(n, int), f"Invalid type for parameter 'n'"
+    assert isinstance(num_genomes, int), f"Invalid type for parameter 'num_genomes'"
+
+
     fasta, gff = file_pair
     name = os.path.basename(fasta).split('.')[0]
 
-    print(f"\nProcessing genome \"{name}\" ({n} of {num_genomes})...")
-    print(f"Extracting transcripts for \"{name}\"...")
+    print(f"\nProcessing genome '{name}' ({n} of {num_genomes})...")
 
-    TRANSCRIPTS_DIR = os.path.join(OUT_DIR, "transcripts")
+    print(f"Extracting transcripts for '{name}'...")
+    create_folder(transcripts_dir)
+    tscript_path = os.path.join(transcripts_dir, name + "_transcripts.fa")
+    extract_transcripts(fasta, gff, tscript_path)
+
+    # extract 3'UTRs from transcripts
+    # COMPARE TO ANNOTATED THALIANA only a limited number available
     
-    try:
-        create_folder(TRANSCRIPTS_DIR)
-    except OSError as e:
-        print(f"Error creating folder {TRANSCRIPTS_DIR}")
-        return
+    # extract X nucleotides from the end of the sequence
+    # USE --w-add <N> option. this modifies CDS= accordingly, can find 3'UTR by subtracting from the end
 
-    tscript_path = os.path.join(TRANSCRIPTS_DIR, name + "_transcripts.fa")
-
-    try:
-        extract_transcripts(fasta, gff, tscript_path)
-        # extract 3'UTRs from transcripts
-        # COMPARE TO ANNOTATED THALIANA only a limited number available
-        
-        # extract X nucleotides from the end of the sequence
-        # USE --w-add <N> option. this modifies CDS= accordingly, can find 3'UTR by subtracting from the end
-
-        # add to 3'UTR to form full terminator
-
-        return EXIT_SUCCESS
-    except Exception:
-        return EXIT_FAILURE
+    # add to 3'UTR to form full terminator
 
 
 def find_files(dir: str) -> list[tuple[str, str]]:
@@ -312,19 +322,19 @@ def find_files(dir: str) -> list[tuple[str, str]]:
     Returns:
         list[tuple[str, str]]: A list of tuples, where each tuple is a pair of fasta and gff file paths.
     """
-    assert os.path.isdir(dir), f"Folder \"{dir}\" does not exist or is not a directory."
+    assert os.path.isdir(dir), f"Folder '{dir}' does not exist or is not a directory."
 
-    FASTA_EXTENSIONS = ("fasta", "fas", "fa", "fna", "ffn", "faa", "mpfa", "frn")
-    GFF_EXTENSIONS = ("gff", "gff3")
+    VALID_FASTA_EXTS = ("fasta", "fas", "fa", "fna", "ffn", "faa", "mpfa", "frn")
+    VALID_GFF_EXTS = ("gff", "gff3")
 
     # iterate through all files in the input folder
     fasta_files: list[str] = []
     gff_files: list[str] = []
     for file in os.listdir(dir):
         file_ext = file.split('.')[-1].lower()
-        if file_ext in FASTA_EXTENSIONS:
+        if file_ext in VALID_FASTA_EXTS:
             fasta_files.append(file)
-        elif file_ext in GFF_EXTENSIONS:
+        elif file_ext in VALID_GFF_EXTS:
             gff_files.append(file)
     
     if len(fasta_files) != len(gff_files):
@@ -354,42 +364,51 @@ def extract_3utrs(fasta_path: str, out_path: str) -> None:
 
 
 def main() -> int:
-    args = parse_cmd_line_args()
-    if not args:
-        return EXIT_FAILURE
-    input_dir = args[0]
+    OUT_DIR: str = "out"
+    UTRS_DIR: str = os.path.join(OUT_DIR, "3utrs")
+    TRANSCRIPTS_DIR: str = os.path.join(OUT_DIR, "transcripts")
+    FILTERED_GFFS_DIR: str = os.path.join(OUT_DIR, "filtered_gffs")
+    TERMINATORS_DIR: str = os.path.join(OUT_DIR, "terminators")
+    DIRS = (TERMINATORS_DIR, UTRS_DIR, TRANSCRIPTS_DIR)
 
-    FILES = find_files(input_dir)
-    if not FILES:
-        print(f"Error: No valid fasta or gff files found in {input_dir}.")
-        return EXIT_FAILURE
+    try:
+        args = parse_cmd_line_args()
+        input_dir: str = args.input_dir
 
-    TERMINATORS_DIR = os.path.join(OUT_DIR, "terminators")
-    UTRS_DIR = os.path.join(OUT_DIR, "3utrs")
-    DIRS = (TERMINATORS_DIR, UTRS_DIR)
-    for dir in DIRS:
-        try:
-            create_folder(dir)
-        except OSError as e:
-            print(f"Error creating folder {dir}")
+        FILES = find_files(input_dir)
+        if not FILES:
+            print(f"Error: No valid fasta or gff files found in {input_dir}.")
             return EXIT_FAILURE
 
-    # set up worker function for multiprocessing
-    worker_func = functools.partial(
-        process_genome,
-        num_genomes=len(FILES),
-    )
 
-    # process each genome in parallel
-    with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
-        results = executor.map(worker_func, FILES, range(1, len(FILES) + 1))
-
-        for result in results:
-            if result == EXIT_FAILURE:
-                print("Error: One or more genomes failed to process.")
+        for dir in DIRS:
+            try:
+                create_folder(dir)
+            except OSError as err:
+                print(f"Error creating folder {dir}: {err}")
                 return EXIT_FAILURE
+
+        # set up worker function for multiprocessing
+        worker_func = functools.partial(
+            process_genome,
+            num_genomes=len(FILES),
+            transcripts_dir=TRANSCRIPTS_DIR,
+        )
+
+        # process each genome in parallel
+        with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
+            results = executor.map(worker_func, FILES, range(1, len(FILES) + 1))
+            list(results) # consume iterator object - raises an exception if any worker process failed
     
-    print("\nFinished")
+    except KeyboardInterrupt:
+        print("\nProcess interrupted by user.", file=sys.stderr)
+        return EXIT_FAILURE
+    except Exception as err:
+        print(f"\nAn unexpected error occurred: {err}", file=sys.stderr)
+        return EXIT_FAILURE
+
+    
+    print("\nFINISHED")
     return EXIT_SUCCESS
 
 
