@@ -11,10 +11,22 @@ import subprocess
 import functools
 import concurrent.futures
 import argparse
+import re
+import pyfastx
 
-# GLOBALS
-EXIT_SUCCESS: int = 0
-EXIT_FAILURE: int = 1
+# --- Custom Exceptions ---
+class TerminatorExtractionError(Exception):
+    """Base exception for this script."""
+    pass
+
+class GFFParsingError(TerminatorExtractionError):
+    """Exception for errors in GFF parsing."""
+    pass
+
+class FileProcessingError(TerminatorExtractionError):
+    """Exception for errors during file processing."""
+    pass
+
 
 def parse_cmd_line_args() -> argparse.Namespace:
     """
@@ -27,7 +39,7 @@ def parse_cmd_line_args() -> argparse.Namespace:
     parser.add_argument(
         "--filter",
         action="store_true",
-        help="Enable filtering of GFF files if gffread encounters errors (default: False)."
+        help="Enable filtering of GFF files if gffread encounters errors."
     )
     parser.add_argument(
         "--max-features",
@@ -49,7 +61,7 @@ def parse_cmd_line_args() -> argparse.Namespace:
     parser.add_argument(
         "--equal-length",
         action="store_true",
-        help="Buffer terminator sequences so that they are all the same length (default: False)."
+        help="Buffer terminator sequences so that they are all equal length."
     )
 
     args = parser.parse_args()
@@ -116,7 +128,7 @@ def build_feature_map(gff_lines: list[str]) -> dict[str, list[dict[str, int | st
     return feature_map
 
 
-def find_related_features(gff_lines: list[str], start_id: str) -> tuple[str, list[int]]:
+def find_related_features(gff_lines: list[str], feature_id: str) -> tuple[str, list[int]]:
     """
     Searches a GFF file for the given ID and returns the line indices for the feature and any related features.
     Args:
@@ -127,13 +139,9 @@ def find_related_features(gff_lines: list[str], start_id: str) -> tuple[str, lis
                                the line indices of the lines related to the feature.
     """
     assert isinstance(gff_lines, list), f"Invalid type for parameter 'gff_lines'"
-    assert isinstance(start_id, str), f"Invalid type for parameter 'start_id'"
+    assert isinstance(feature_id, str), f"Invalid type for parameter 'start_id'"
 
     feature_map = build_feature_map(gff_lines)
-
-    if start_id not in feature_map:
-        print(f"Error: ID {start_id} not found.")
-        return tuple()
 
     @functools.lru_cache(maxsize=None)
     def get_root(f_id: str) -> str:
@@ -145,9 +153,9 @@ def find_related_features(gff_lines: list[str], start_id: str) -> tuple[str, lis
         if parent:
             return get_root(parent)
 
-        return f_id
+        return f_id # if no parent found, root ID has been reached
     
-    root_id = get_root(start_id)
+    root_id = get_root(feature_id)
 
     all_ids = [
         f_id for f_id in feature_map
@@ -159,13 +167,10 @@ def find_related_features(gff_lines: list[str], start_id: str) -> tuple[str, lis
         for part in feature_map[f_id]:
             all_idxs.append(part["idx"])
 
-    if not all_idxs:
-        return tuple()
-
     return root_id, sorted(all_idxs)
 
 
-def filter_gff(f_id: str, in_path: str, out_path: str) -> str:
+def filter_gff(feature_id: str, in_fpath: str, out_fpath: str) -> str:
     """
     Filters a GFF file to remove all lines related to a given feature ID.
     Args:
@@ -175,25 +180,21 @@ def filter_gff(f_id: str, in_path: str, out_path: str) -> str:
     Returns:
         str: The root ID (top-level feature ID i.e., gene ID) of the removed feature.
     """
-    assert os.path.isfile(in_path), f"Input file {in_path} does not exist."
-    assert isinstance(f_id, str), f"Invalid type for parameter 'f_id'"
-    assert isinstance(out_path, str), f"Invalid type for parameter 'out_path'"
+    assert os.path.isfile(in_fpath), f"Input file {in_fpath} does not exist."
+    assert isinstance(feature_id, str), f"Invalid type for parameter 'f_id'"
+    assert isinstance(out_fpath, str), f"Invalid type for parameter 'out_path'"
 
-    with open(in_path, 'r') as f:
+    with open(in_fpath, 'r') as f:
         lines = f.readlines()
     
-    root_id, line_idxs = find_related_features(lines, f_id)
+    root_id, line_idxs = find_related_features(lines, feature_id)
     
     lines_to_keep = [line for i, line in enumerate(lines) if i not in line_idxs]
 
-    try:
-        with open(out_path, 'w') as f:
-            f.writelines(lines_to_keep)
-    except OSError as e:
-        print(f"Error: Could not create/open output file \"{out_path}\": {e}")
-        raise OSError
+    with open(out_fpath, 'w') as f:
+        f.writelines(lines_to_keep)
 
-    print(f"{len(line_idxs)} line/s removed from {in_path}:")
+    print(f"{len(line_idxs)} line/s removed from {in_fpath}:")
     for i in line_idxs:
         print(lines[i], end="")
     
@@ -210,56 +211,58 @@ def create_folder(path: str) -> None:
 
     if not os.path.exists(path):
         os.makedirs(path)
-        print(f"Created directory: {path}")
+        print(f"Created directory: '{path}'")
 
 
-def extract_transcripts(fasta_path: str, gff_path: str, out_path: str) -> None:
+def extract_transcripts(fasta_fpath: str, gff_fpath: str, out_dir: str, out_fpath: str) -> None:
     """
     Extracts transcripts for the specified fasta file and gff file.
     """
-    assert os.path.isfile(fasta_path), f"FASTA file {fasta_path} does not exist."
-    assert os.path.isfile(gff_path), f"GFF file {gff_path} does not exist."
-    assert isinstance(out_path, str), f"Invalid type for parameter 'out_path'"
+    assert os.path.isfile(fasta_fpath), f"FASTA file {fasta_fpath} does not exist."
+    assert os.path.isfile(gff_fpath), f"GFF file {gff_fpath} does not exist."
+    assert os.path.isdir(out_dir), f"Output directory {out_dir} does not exist or is not a directory."
+    assert isinstance(out_fpath, str), f"Invalid type for parameter 'out_fname'"
 
-    GFFREAD_ERRORS = ("Error parsing", "GffObj::getSpliced() error: improper genomic coordinate")
-    MAX_ITERATIONS = 10
+    gffread_errs = ("Error parsing", "GffObj::getSpliced() error: improper genomic coordinate")
+    max_iterations = 10
 
-    name = os.path.basename(fasta_path).split('.')[0]
-    filtered_name = name + "_filtered.gff"
+    genome_name = os.path.basename(fasta_fpath).split('.')[0]
 
-    filtered_gff_path = os.path.join(FILTERED_GFFS_DIR, filtered_name)
+    filtered_fname = genome_name + "_filtered.gff"
+    filtered_gffs_dir = os.path.join(out_dir, "filtered_gffs")
+    filtered_gff_fpath = os.path.join(filtered_gffs_dir, filtered_fname)
     features_removed: list[str] = []
 
-    for i in range(MAX_ITERATIONS):
+    for i in range(max_iterations):
         if i > 0:
-            print(f"\nRe-running gffread with \"{filtered_name}\"...")
+            print(f"\nRe-running gffread with '{filtered_fname}'...")
         if i == 1:
-            gff_path = filtered_gff_path
+            gff_fpath = filtered_gff_fpath
 
         try:
             subprocess.run(
                 [
                     "gffread",
-                    "-w", out_path,
-                    "-g", fasta_path,
-                    gff_path
+                    "-w", out_fpath,
+                    "-g", fasta_fpath,
+                    gff_fpath
                 ],
                 capture_output=True, 
                 text=True, 
                 check=True)
             
-            print(f"Transcripts successfully extracted to \"{out_path}\"")
+            print(f"Transcripts successfully extracted to '{out_fpath}'")
 
             if features_removed:
-                print(f"Features removed from \"{name}\":\n{'\n'.join(features_removed)}")
+                as_str = "\n".join(features_removed)
+                print(f"Features removed from '{genome_name}':\n{as_str}")
             
             break
         except subprocess.CalledProcessError as err:
-            print(f"\nError running gffread for {name}:")
-            print(err.stderr)
+            print(f"\nError running gffread for '{genome_name}':\n{err.stderr}")
 
-            is_parsing_error = err.stderr.startswith(GFFREAD_ERRORS[0])
-            is_improper_coord_error = err.stderr.startswith(GFFREAD_ERRORS[1])
+            is_parsing_error = err.stderr.startswith(gffread_errs[0])
+            is_improper_coord_error = err.stderr.startswith(gffread_errs[1])
 
             if is_parsing_error:
                 gff_line = err.stderr.split('\n')[1]
@@ -268,20 +271,17 @@ def extract_transcripts(fasta_path: str, gff_path: str, out_path: str) -> None:
             elif is_improper_coord_error:
                 id = err.stderr.split(' ')[-1].strip()
             else:
-                print("\nError: unable to handle gffread error.")
-                raise Exception
+                raise GFFParsingError(
+                    f"Unexpected error parsing GFF file '{gff_fpath}': {err.stderr}"
+                )
 
-            try:
-                create_folder(FILTERED_GFFS_DIR)
-                feature_removed = filter_gff(id, gff_path, filtered_gff_path)
-            except OSError as e:
-                print(f"Error: {e}")
-                raise Exception
+            create_folder(filtered_gffs_dir)
+            feature_removed = filter_gff(id, gff_fpath, filtered_gff_fpath)
             
             features_removed.append(feature_removed)
 
 
-def process_genome(file_pair: tuple[str, str], n: int, num_genomes: int, transcripts_dir: str) -> None:
+def process_genome(file_pair: tuple[str, str], n: int, num_genomes: int, out_dir: str) -> None:
     """
     Processes a single genome.
     Args:
@@ -294,16 +294,16 @@ def process_genome(file_pair: tuple[str, str], n: int, num_genomes: int, transcr
     assert isinstance(n, int), f"Invalid type for parameter 'n'"
     assert isinstance(num_genomes, int), f"Invalid type for parameter 'num_genomes'"
 
-
     fasta, gff = file_pair
-    name = os.path.basename(fasta).split('.')[0]
+    genome_name = os.path.basename(fasta).split('.')[0]
 
-    print(f"\nProcessing genome '{name}' ({n} of {num_genomes})...")
+    print(f"\nProcessing genome '{genome_name}' ({n} of {num_genomes})...")
 
-    print(f"Extracting transcripts for '{name}'...")
-    create_folder(transcripts_dir)
-    tscript_path = os.path.join(transcripts_dir, name + "_transcripts.fa")
-    extract_transcripts(fasta, gff, tscript_path)
+    print(f"Extracting transcripts for '{genome_name}'...")
+    tscripts_dir = os.path.join(out_dir, "transcripts")
+    create_folder(tscripts_dir)
+    tscript_fpath = os.path.join(tscripts_dir, genome_name + "_transcripts.fa")
+    extract_transcripts(fasta, gff, out_dir, tscript_fpath)
 
     # extract 3'UTRs from transcripts
     # COMPARE TO ANNOTATED THALIANA only a limited number available
@@ -324,29 +324,29 @@ def find_files(dir: str) -> list[tuple[str, str]]:
     """
     assert os.path.isdir(dir), f"Folder '{dir}' does not exist or is not a directory."
 
-    VALID_FASTA_EXTS = ("fasta", "fas", "fa", "fna", "ffn", "faa", "mpfa", "frn")
-    VALID_GFF_EXTS = ("gff", "gff3")
+    valid_fasta_exts = ("fasta", "fas", "fa", "fna", "ffn", "faa", "mpfa", "frn")
+    valid_gff_exts = ("gff", "gff3")
 
     # iterate through all files in the input folder
     fasta_files: list[str] = []
     gff_files: list[str] = []
     for file in os.listdir(dir):
         file_ext = file.split('.')[-1].lower()
-        if file_ext in VALID_FASTA_EXTS:
+        if file_ext in valid_fasta_exts:
             fasta_files.append(file)
-        elif file_ext in VALID_GFF_EXTS:
+        elif file_ext in valid_gff_exts:
             gff_files.append(file)
     
     if len(fasta_files) != len(gff_files):
-        print("Error: The number of fasta files and gff files must match.")
-        return []
+        raise FileProcessingError(
+            f"Number of fasta files ({len(fasta_files)}) does not match number of gff files ({len(gff_files)})."
+        )
 
     files = list(zip(fasta_files, gff_files))
     i = 0
     for fasta, gff in files:
         if fasta.split('.')[0] != gff.split('.')[0]:
-            print(f"Error: Mismatched filenames: {fasta} and {gff}")
-            return []
+            raise FileProcessingError(f"Fasta file '{fasta}' and GFF file '{gff}' do not match in name.")
         else:
             files[i] = (os.path.join(dir, fasta), os.path.join(dir, gff))
         i += 1
@@ -354,62 +354,64 @@ def find_files(dir: str) -> list[tuple[str, str]]:
     return files
 
 
-def extract_3utrs(fasta_path: str, out_path: str) -> None:
+def extract_3utrs(tscript_fpath: str, out_fpath: str) -> None:
     """
     
     """
-    assert os.path.isfile(fasta_path), f"FASTA file {fasta_path} does not exist."
-    assert isinstance(out_path, str), f"Invalid type for parameter 'out_path'"
-    
+    assert os.path.isfile(tscript_fpath), f"FASTA file {tscript_fpath} does not exist."
+    assert isinstance(out_fpath, str), f"Invalid type for parameter 'out_path'"
 
+    
+    
 
 def main() -> int:
-    OUT_DIR: str = "out"
-    UTRS_DIR: str = os.path.join(OUT_DIR, "3utrs")
-    TRANSCRIPTS_DIR: str = os.path.join(OUT_DIR, "transcripts")
-    FILTERED_GFFS_DIR: str = os.path.join(OUT_DIR, "filtered_gffs")
-    TERMINATORS_DIR: str = os.path.join(OUT_DIR, "terminators")
-    DIRS = (TERMINATORS_DIR, UTRS_DIR, TRANSCRIPTS_DIR)
+    exit_success = 0
+    exit_failure = 1
+
+    out_dir = "out"
+    utrs_dir = os.path.join(out_dir, "3utrs")
+    terminators_dir = os.path.join(out_dir, "terminators")
+    dirs = (terminators_dir, utrs_dir)
 
     try:
         args = parse_cmd_line_args()
         input_dir: str = args.input_dir
 
-        FILES = find_files(input_dir)
-        if not FILES:
-            print(f"Error: No valid fasta or gff files found in {input_dir}.")
-            return EXIT_FAILURE
+        files = find_files(input_dir)
 
-
-        for dir in DIRS:
-            try:
-                create_folder(dir)
-            except OSError as err:
-                print(f"Error creating folder {dir}: {err}")
-                return EXIT_FAILURE
+        for dir in dirs:
+            create_folder(dir)
 
         # set up worker function for multiprocessing
         worker_func = functools.partial(
             process_genome,
-            num_genomes=len(FILES),
-            transcripts_dir=TRANSCRIPTS_DIR,
+            num_genomes=len(files),
+            out_dir=out_dir
         )
 
         # process each genome in parallel
         with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
-            results = executor.map(worker_func, FILES, range(1, len(FILES) + 1))
-            list(results) # consume iterator object - raises an exception if any worker process failed
+            results = executor.map(worker_func, files, range(1, len(files) + 1))
+            list(results) # consume iterator object - raises an exception if any worker process raised an exception
     
+    except GFFParsingError as err:
+        print(f"\nGFF Parsing Error: {err}", file=sys.stderr)
+        return exit_failure
+    except FileProcessingError as err:
+        print(f"\nFile Processing Error: {err}", file=sys.stderr)
+        return exit_failure
+    except OSError as err:
+        print(f"\nOS Error: {err.strerror}", file=sys.stderr)
+        return exit_failure
     except KeyboardInterrupt:
-        print("\nProcess interrupted by user.", file=sys.stderr)
-        return EXIT_FAILURE
+        print("\nInterrupted by user.", file=sys.stderr)
+        return exit_failure
     except Exception as err:
         print(f"\nAn unexpected error occurred: {err}", file=sys.stderr)
-        return EXIT_FAILURE
-
+        return exit_failure
     
     print("\nFINISHED")
-    return EXIT_SUCCESS
+    return exit_success
 
 
 if __name__ == "__main__":
