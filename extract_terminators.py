@@ -1,5 +1,5 @@
 # gffread https://ccb.jhu.edu/software/stringtie/gff.shtml
-# DESKTOP: /mnt/c/Users/Emerson/Documents/QUT/2025/EGH400 Local/project-code
+# pyfastx https://pypi.org/project/pyfastx/
 # LAPTOP: /mnt/c/Users/emers/Documents/QUT/2025/EGH400 Local/project-code
 
 # TODO: replace gffread with a python library (e.g. gffutils, pybedtools, BioPython) these may have more robust parsing and would make the code cleaner
@@ -12,6 +12,10 @@ import functools
 import concurrent.futures
 import argparse
 import re
+import textwrap
+
+# External libraries
+import gffutils
 import pyfastx
 
 # --- Custom Exceptions ---
@@ -28,7 +32,7 @@ class FileProcessingError(TerminatorExtractionError):
     pass
 
 
-def parse_cmd_line_args() -> argparse.Namespace:
+def get_args() -> argparse.Namespace:
     """
     Parses command line arguments using argparse.
     """
@@ -37,7 +41,7 @@ def parse_cmd_line_args() -> argparse.Namespace:
     )
     parser.add_argument("input_dir", help="Path to the input folder containing FASTA and GFF files.")
     parser.add_argument(
-        "--filter",
+        "--enable-filtering",
         action="store_true",
         help="Enable filtering of GFF files if gffread encounters errors."
     )
@@ -194,27 +198,12 @@ def filter_gff(feature_id: str, in_fpath: str, out_fpath: str) -> str:
     with open(out_fpath, 'w') as f:
         f.writelines(lines_to_keep)
 
-    print(f"{len(line_idxs)} line/s removed from {in_fpath}:")
-    for i in line_idxs:
-        print(lines[i], end="")
+    print(f"{len(line_idxs)} line/s removed from '{in_fpath}':")
     
     return root_id
 
 
-def create_folder(path: str) -> None:
-    """
-    Creates a folder at the specified path if it does not already exist.
-    Args:
-        path (str): The path of the folder to create.
-    """
-    assert isinstance(path, str), f"Invalid type for parameter 'path'"
-
-    if not os.path.exists(path):
-        os.makedirs(path)
-        print(f"Created directory: '{path}'")
-
-
-def extract_transcripts(fasta_fpath: str, gff_fpath: str, out_dir: str, out_fpath: str) -> None:
+def get_transcripts(fasta_fpath: str, gff_fpath: str, out_dir: str, out_fpath: str) -> None:
     """
     Extracts transcripts for the specified fasta file and gff file.
     """
@@ -224,7 +213,7 @@ def extract_transcripts(fasta_fpath: str, gff_fpath: str, out_dir: str, out_fpat
     assert isinstance(out_fpath, str), f"Invalid type for parameter 'out_fname'"
 
     gffread_errs = ("Error parsing", "GffObj::getSpliced() error: improper genomic coordinate")
-    max_iterations = 10
+    max_iterations = 10 # TODO: use cmd line arg
 
     genome_name = os.path.basename(fasta_fpath).split('.')[0]
 
@@ -275,10 +264,39 @@ def extract_transcripts(fasta_fpath: str, gff_fpath: str, out_dir: str, out_fpat
                     f"Unexpected error parsing GFF file '{gff_fpath}': {err.stderr}"
                 )
 
-            create_folder(filtered_gffs_dir)
+            os.makedirs(filtered_gffs_dir, exist_ok=True)
             feature_removed = filter_gff(id, gff_fpath, filtered_gff_fpath)
             
             features_removed.append(feature_removed)
+
+
+def get_post_cds(tscript_fpath: str, out_fpath: str, line_width: int = 70) -> None:
+    """
+    
+    """
+    assert os.path.isfile(tscript_fpath), f"FASTA file '{tscript_fpath}' does not exist."
+    assert isinstance(out_fpath, str), f"Invalid type for parameter 'out_fpath'"
+
+    tscripts = pyfastx.Fasta(tscript_fpath)
+    utr_count = 0
+
+    with open(out_fpath, 'w') as out_f:
+        for record in tscripts:
+            cds_match = re.search(r'CDS=(\d+)-(\d+)', record.description)
+
+            if cds_match:
+                cds_end_pos = int(cds_match.group(2))
+                utr_seq = record.seq[cds_end_pos:]
+
+                if utr_seq:
+                    id = record.name.split()[0]  # Get the ID from the FASTA header
+
+                    wrapped_utr_seq = textwrap.fill(utr_seq, width=line_width)
+
+                    out_f.write(f">{id}_3utr\n{wrapped_utr_seq}\n")
+                    utr_count += 1
+    
+    print(f"Extracted {utr_count} 3'UTRs from a total of {len(tscripts)} transcripts from '{tscript_fpath}' to '{out_fpath}'.")
 
 
 def process_genome(file_pair: tuple[str, str], n: int, num_genomes: int, out_dir: str) -> None:
@@ -288,6 +306,7 @@ def process_genome(file_pair: tuple[str, str], n: int, num_genomes: int, out_dir
         file_pair (tuple[str, str]): A tuple containing the fasta and gff file paths for a single genome.
         n (int): The current genome number being processed.
         num_genomes (int): The total number of genomes to process.
+        out_dir (str): The output directory where results will be saved.
     """
     assert isinstance(file_pair, tuple), f"Invalid type for parameter 'file_pair'"
     assert len(file_pair) == 2, f"Invalid length for parameter 'file_pair', expected 2 elements."
@@ -301,17 +320,19 @@ def process_genome(file_pair: tuple[str, str], n: int, num_genomes: int, out_dir
 
     print(f"Extracting transcripts for '{genome_name}'...")
     tscripts_dir = os.path.join(out_dir, "transcripts")
-    create_folder(tscripts_dir)
+    os.makedirs(tscripts_dir, exist_ok=True)
     tscript_fpath = os.path.join(tscripts_dir, genome_name + "_transcripts.fa")
-    extract_transcripts(fasta, gff, out_dir, tscript_fpath)
+    get_transcripts(fasta, gff, out_dir, tscript_fpath)
 
     # extract 3'UTRs from transcripts
-    # COMPARE TO ANNOTATED THALIANA only a limited number available
-    
-    # extract X nucleotides from the end of the sequence
-    # USE --w-add <N> option. this modifies CDS= accordingly, can find 3'UTR by subtracting from the end
+    utrs_dir = os.path.join(out_dir, "3utrs")
+    os.makedirs(utrs_dir, exist_ok=True)
+    utrs_fpath = os.path.join(utrs_dir, genome_name + "_3utrs.fa")
+    get_post_cds(tscript_fpath, utrs_fpath)
 
-    # add to 3'UTR to form full terminator
+    
+    # extract X nucleotides from the end of the sequence for full terminator
+    # USE --w-add <N> option. this modifies CDS= accordingly, can find 3'UTR by subtracting from the end
 
 
 def find_files(dir: str) -> list[tuple[str, str]]:
@@ -330,7 +351,7 @@ def find_files(dir: str) -> list[tuple[str, str]]:
     # iterate through all files in the input folder
     fasta_files: list[str] = []
     gff_files: list[str] = []
-    for file in os.listdir(dir):
+    for file in sorted(os.listdir(dir)):
         file_ext = file.split('.')[-1].lower()
         if file_ext in valid_fasta_exts:
             fasta_files.append(file)
@@ -354,46 +375,88 @@ def find_files(dir: str) -> list[tuple[str, str]]:
     return files
 
 
-def extract_3utrs(tscript_fpath: str, out_fpath: str) -> None:
+def get_annotated_utrs(fasta_fpath: str, gff_fpath: str) -> list[str]:
     """
+    Extracts annotated 3' UTRs from a GFF file and returns them as a list of strings.
     
+    Uses pyfastx to fetch sequences from the FASTA file.
+    Args:
+        fasta_fpath (str): The path to the FASTA file.
+        gff_fpath (str): The path to the GFF file.
+    Returns:
+        list[str]: A list of 3'UTR sequences.
     """
-    assert os.path.isfile(tscript_fpath), f"FASTA file {tscript_fpath} does not exist."
-    assert isinstance(out_fpath, str), f"Invalid type for parameter 'out_path'"
+    assert os.path.isfile(fasta_fpath), f"FASTA file '{fasta_fpath}' does not exist."
+    assert os.path.isfile(gff_fpath), f"GFF file '{gff_fpath}' does not exist."
 
+    db_fpath = os.path.basename(gff_fpath) + ".db"
+
+    if not os.path.exists(db_fpath):
+        print(f"Creating GFF database for '{gff_fpath}'...")
+        gffutils.create_db(
+            gff_fpath,
+            dbfn=db_fpath,
+            force=True,
+            merge_strategy="merge",
+        )
     
-    
+    print(f"Loading GFF database from '{db_fpath}'...")
+    db = gffutils.FeatureDB(db_fpath)
+
+    genome = pyfastx.Fasta(fasta_fpath)
+
+    seqs = []
+    for utr in db.features_of_type("three_prime_UTR"):
+        try:
+            seq = genome[utr.chrom][utr.start - 1 : utr.end].seq
+
+            if utr.strand == "-":
+                seq = seq.reverse.complement
+            
+            seqs.append(seq)
+        
+        except (KeyError, IndexError) as err:
+            print(f"Warning: could not find feature {utr.id} in FASTA file. Error: {err}", file=sys.stderr)
+            continue
+
+    return seqs
 
 def main() -> int:
     exit_success = 0
     exit_failure = 1
 
-    out_dir = "out"
-    utrs_dir = os.path.join(out_dir, "3utrs")
+    out_dir = "out" # TODO: move into process_genome function?
     terminators_dir = os.path.join(out_dir, "terminators")
-    dirs = (terminators_dir, utrs_dir)
 
     try:
-        args = parse_cmd_line_args()
+        args = get_args()
         input_dir: str = args.input_dir
 
         files = find_files(input_dir)
 
-        for dir in dirs:
-            create_folder(dir)
+        os.makedirs(terminators_dir, exist_ok=True)
 
-        # set up worker function for multiprocessing
+        # worker function for multiprocessing
         worker_func = functools.partial(
             process_genome,
             num_genomes=len(files),
             out_dir=out_dir
         )
 
+        # COMPARE TO ANNOTATED THALIANA
+        ground_truth_utrs = get_annotated_utrs(
+            os.path.join(input_dir, "thaliana.fna"),
+            os.path.join(out_dir, "filtered_gffs", "thaliana_filtered.gff")
+        )
+
+        print(f"\nExtracted {len(ground_truth_utrs)} annotated 3' UTRs from the ground truth GFF file.")
+        print(f"Ground truth 3' UTRs: {ground_truth_utrs}")
+
         # process each genome in parallel
         with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
             results = executor.map(worker_func, files, range(1, len(files) + 1))
-            list(results) # consume iterator object - raises an exception if any worker process raised an exception
-    
+            list(results) # consume iterator - raises an exception if any worker process raised an exception
+
     except GFFParsingError as err:
         print(f"\nGFF Parsing Error: {err}", file=sys.stderr)
         return exit_failure
