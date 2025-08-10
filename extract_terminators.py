@@ -15,7 +15,6 @@ import re
 import textwrap
 
 # External libraries
-import gffutils
 import pyfastx
 
 # --- Custom Exceptions ---
@@ -389,35 +388,37 @@ def get_annotated_utrs(fasta_fpath: str, gff_fpath: str) -> list[str]:
     assert os.path.isfile(fasta_fpath), f"FASTA file '{fasta_fpath}' does not exist."
     assert os.path.isfile(gff_fpath), f"GFF file '{gff_fpath}' does not exist."
 
-    db_fpath = os.path.basename(gff_fpath) + ".db"
-
-    if not os.path.exists(db_fpath):
-        print(f"Creating GFF database for '{gff_fpath}'...")
-        gffutils.create_db(
-            gff_fpath,
-            dbfn=db_fpath,
-            force=True,
-            merge_strategy="merge",
-        )
-    
-    print(f"Loading GFF database from '{db_fpath}'...")
-    db = gffutils.FeatureDB(db_fpath)
-
     genome = pyfastx.Fasta(fasta_fpath)
 
     seqs = []
-    for utr in db.features_of_type("three_prime_UTR"):
-        try:
-            seq = genome[utr.chrom][utr.start - 1 : utr.end].seq
-
-            if utr.strand == "-":
-                seq = seq.reverse.complement
+    with open(gff_fpath, 'r') as gff_file:
+        for line in gff_file:
+            if line.startswith('#') or not line.strip(): # skip comments and blank lines
+                continue
             
-            seqs.append(seq)
-        
-        except (KeyError, IndexError) as err:
-            print(f"Warning: could not find feature {utr.id} in FASTA file. Error: {err}", file=sys.stderr)
-            continue
+            parts = line.strip().split('\t')
+            if len(parts) >= 9 and parts[2] == "three_prime_UTR":
+                try:
+                    chrom = parts[0]
+                    if chrom not in genome:
+                        print(f"Chromosome '{chrom}' not found in FASTA file '{fasta_fpath}'. Skipping line: {line.strip()}", file=sys.stderr)
+                        continue
+
+                    start = int(parts[3]) - 1  # GFF is 1-based
+                    end = int(parts[4])
+                    strand = parts[6]
+
+                    # fetch the sequence from the FASTA file
+                    seq = genome[chrom][start:end]
+
+                    if strand == '-':
+                        seq = seq.antisense
+                    
+                    seqs.append(str(seq))
+                
+                except (KeyError, IndexError) as err:
+                    print(f"Error processing line '{line.strip()}': {err}", file=sys.stderr)
+                    continue
 
     return seqs
 
@@ -449,8 +450,8 @@ def main() -> int:
             os.path.join(out_dir, "filtered_gffs", "thaliana_filtered.gff")
         )
 
-        print(f"\nExtracted {len(ground_truth_utrs)} annotated 3' UTRs from the ground truth GFF file.")
-        print(f"Ground truth 3' UTRs: {ground_truth_utrs}")
+        print(f"\nExtracted {len(ground_truth_utrs)} annotated 3'UTRs from the ground truth GFF file.")
+        utr_fasta = pyfastx.Fasta(os.path.join(out_dir, "3utrs", "thaliana_3utrs.fa"))
 
         # process each genome in parallel
         with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
