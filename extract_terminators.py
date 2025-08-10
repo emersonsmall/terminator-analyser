@@ -294,7 +294,7 @@ def get_post_cds(tscript_fpath: str, out_fpath: str, line_width: int = 70) -> No
                     out_f.write(f">{id}_3utr\n{wrapped_utr_seq}\n")
                     utr_count += 1
     
-    print(f"Extracted {utr_count} 3'UTRs from a total of {len(tscripts)} transcripts from '{tscript_fpath}' to '{out_fpath}'.")
+    print(f"Extracted {utr_count} 3'UTRs from {len(tscripts)} transcripts to '{out_fpath}'.")
 
 
 def process_genome(file_pair: tuple[str, str], n: int, num_genomes: int, out_dir: str, max_iterations: int) -> None:
@@ -373,54 +373,6 @@ def find_files(dir: str) -> list[tuple[str, str]]:
     return files
 
 
-def get_annotated_utrs(fasta_fpath: str, gff_fpath: str) -> list[str]:
-    """
-    Extracts annotated 3' UTRs from a GFF file and returns them as a list of strings.
-    
-    Uses pyfastx to fetch sequences from the FASTA file.
-    Args:
-        fasta_fpath (str): The path to the FASTA file.
-        gff_fpath (str): The path to the GFF file.
-    Returns:
-        list[str]: A list of 3'UTR sequences.
-    """
-    assert os.path.isfile(fasta_fpath), f"FASTA file '{fasta_fpath}' does not exist."
-    assert os.path.isfile(gff_fpath), f"GFF file '{gff_fpath}' does not exist."
-
-    genome = pyfastx.Fasta(fasta_fpath)
-
-    seqs = []
-    with open(gff_fpath, 'r') as gff_file:
-        for line in gff_file:
-            if line.startswith('#') or not line.strip(): # skip comments and blank lines
-                continue
-            
-            parts = line.strip().split('\t')
-            if len(parts) >= 9 and parts[2] == "three_prime_UTR":
-                try:
-                    chrom = parts[0]
-                    if chrom not in genome:
-                        print(f"Chromosome '{chrom}' not found in FASTA file '{fasta_fpath}'. Skipping line: {line.strip()}", file=sys.stderr)
-                        continue
-
-                    start = int(parts[3]) - 1  # GFF is 1-based
-                    end = int(parts[4])
-                    strand = parts[6]
-
-                    # fetch the sequence from the FASTA file
-                    seq = genome[chrom][start:end]
-
-                    if strand == '-':
-                        seq = seq.antisense
-                    
-                    seqs.append(str(seq))
-                
-                except (KeyError, IndexError) as err:
-                    print(f"Error processing line '{line.strip()}': {err}", file=sys.stderr)
-                    continue
-
-    return seqs
-
 def main() -> int:
     exit_success = 0
     exit_failure = 1
@@ -447,20 +399,13 @@ def main() -> int:
         )
 
         # COMPARE TO ANNOTATED THALIANA
-        thaliana_fasta = os.path.join(input_dir, "thaliana.fna")
-        thaliana_gff = os.path.join(input_dir, "thaliana.gff")
-        ground_truth_utrs = pyfastx.Fasta()
+        # TODO: fix
+        # TAIR annotation has gene IDs, my _3utrs has rna IDs
+        annotated_3utrs = pyfastx.Fasta("./TAIR10_3_utr_20101028.fa")
+        predicted_3utrs = pyfastx.Fasta("out/3utrs/thaliana_3utrs.fa")
 
-        print(f"\nExtracted {len(ground_truth_utrs)} 3'UTRs from the Thaliana GFF file.")
-        predicted_utrs = pyfastx.Fasta(os.path.join(out_dir, "3utrs", "thaliana_3utrs.fa"))
-
-        with open(thaliana_gff, 'r') as f:
+        with open(os.path.join(input_dir, "thaliana.gff"), 'r') as f:
             lines = f.readlines()
-
-        f_map = build_feature_map(lines)
-        for utr in ground_truth_utrs:
-            print(utr)
-            break
 
         # process each genome in parallel
         with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
