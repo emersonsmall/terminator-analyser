@@ -1,8 +1,8 @@
 # gffread https://ccb.jhu.edu/software/stringtie/gff.shtml
 # pyfastx https://pypi.org/project/pyfastx/
-# LAPTOP: /mnt/c/Users/emers/Documents/QUT/2025/EGH400 Local/project-code
+# TAIR 3'UTR source https://www.arabidopsis.org/download/list?dir=Sequences%2FTAIR10_blastsets
 
-# TODO: replace gffread with a python library (e.g. gffutils, pybedtools, BioPython) these may have more robust parsing and would make the code cleaner
+# TODO: replace gffread with a python library? (e.g. gffutils, pybedtools, BioPython) these may have more robust parsing and would make code cleaner
 # need to verify they have the same functionality
 
 import os
@@ -131,20 +131,19 @@ def build_feature_map(gff_lines: list[str]) -> dict[str, list[dict[str, int | st
     return feature_map
 
 
-def find_related_features(gff_lines: list[str], feature_id: str) -> tuple[str, list[int]]:
+def find_related_features(gff_lines: list[str], feature_id: str, feature_map: dict[str, list[dict[str, int | str | None]]]) -> tuple[str, list[int]]:
     """
-    Searches a GFF file for the given ID and returns the line indices for the feature and any related features.
+    Searches the given GFF lines for the given feature ID and returns the root ID (gene ID) and line indices for the feature and any related features.
     Args:
         gff_lines (list[str]): A list of strings where each string is a line from a gff file.
-        start_id (str): The ID of the feature to search for.
+        feature_id (str): The ID of the feature to search for.
+        feature_map (dict[str, list[dict[str, int | str | None]]]): A dictionary mapping each feature ID to a list of its lines with line index and parent attribute.
     Returns:
-        tuple[str, list[int]]: The 1st element is the root id of the feature, and the 2nd element is a list containing 
-                               the line indices of the lines related to the feature.
+        tuple[str, list[int]]: The root id of the feature, and a sorted list of all line indices related to the feature.
     """
     assert isinstance(gff_lines, list), f"Invalid type for parameter 'gff_lines'"
     assert isinstance(feature_id, str), f"Invalid type for parameter 'start_id'"
-
-    feature_map = build_feature_map(gff_lines)
+    assert isinstance(feature_map, dict), f"Invalid type for parameter 'feature_map'"
 
     @functools.lru_cache(maxsize=None)
     def get_root(f_id: str) -> str:
@@ -156,21 +155,21 @@ def find_related_features(gff_lines: list[str], feature_id: str) -> tuple[str, l
         if parent:
             return get_root(parent)
 
-        return f_id # if no parent found, root ID has been reached
+        return f_id # if no parent found, root ID reached
     
     root_id = get_root(feature_id)
 
-    all_ids = [
+    common_root_ids = [
         f_id for f_id in feature_map
         if get_root(f_id) == root_id
     ]
 
-    all_idxs = []
-    for f_id in all_ids:
-        for part in feature_map[f_id]:
-            all_idxs.append(part["idx"])
+    common_root_idxs = []
+    for f_id in common_root_ids:
+        for feature in feature_map[f_id]:
+            common_root_idxs.append(feature["idx"])
 
-    return root_id, sorted(all_idxs)
+    return root_id, sorted(common_root_idxs)
 
 
 def filter_gff(feature_id: str, in_fpath: str, out_fpath: str) -> str:
@@ -190,7 +189,8 @@ def filter_gff(feature_id: str, in_fpath: str, out_fpath: str) -> str:
     with open(in_fpath, 'r') as f:
         lines = f.readlines()
     
-    root_id, line_idxs = find_related_features(lines, feature_id)
+    f_map = build_feature_map(lines)
+    root_id, line_idxs = find_related_features(lines, feature_id, f_map)
     
     lines_to_keep = [line for i, line in enumerate(lines) if i not in line_idxs]
 
@@ -202,7 +202,7 @@ def filter_gff(feature_id: str, in_fpath: str, out_fpath: str) -> str:
     return root_id
 
 
-def get_transcripts(fasta_fpath: str, gff_fpath: str, out_dir: str, out_fpath: str) -> None:
+def get_transcripts(fasta_fpath: str, gff_fpath: str, out_dir: str, out_fpath: str, max_iterations: int) -> None:
     """
     Extracts transcripts for the specified fasta file and gff file.
     """
@@ -212,7 +212,6 @@ def get_transcripts(fasta_fpath: str, gff_fpath: str, out_dir: str, out_fpath: s
     assert isinstance(out_fpath, str), f"Invalid type for parameter 'out_fname'"
 
     gffread_errs = ("Error parsing", "GffObj::getSpliced() error: improper genomic coordinate")
-    max_iterations = 10 # TODO: use cmd line arg
 
     genome_name = os.path.basename(fasta_fpath).split('.')[0]
 
@@ -298,7 +297,7 @@ def get_post_cds(tscript_fpath: str, out_fpath: str, line_width: int = 70) -> No
     print(f"Extracted {utr_count} 3'UTRs from {len(tscripts)} transcripts to '{out_fpath}'.")
 
 
-def process_genome(file_pair: tuple[str, str], n: int, num_genomes: int, out_dir: str) -> None:
+def process_genome(file_pair: tuple[str, str], n: int, num_genomes: int, out_dir: str, max_iterations: int) -> None:
     """
     Processes a single genome.
     Args:
@@ -321,7 +320,7 @@ def process_genome(file_pair: tuple[str, str], n: int, num_genomes: int, out_dir
     tscripts_dir = os.path.join(out_dir, "transcripts")
     os.makedirs(tscripts_dir, exist_ok=True)
     tscript_fpath = os.path.join(tscripts_dir, genome_name + "_transcripts.fa")
-    get_transcripts(fasta, gff, out_dir, tscript_fpath)
+    get_transcripts(fasta, gff, out_dir, tscript_fpath, max_iterations)
 
     # extract 3'UTRs from transcripts
     utrs_dir = os.path.join(out_dir, "3utrs")
@@ -378,12 +377,14 @@ def main() -> int:
     exit_success = 0
     exit_failure = 1
 
-    out_dir = "out" # TODO: move into process_genome function?
+    out_dir = "out" # TODO: move into process_genome?
     terminators_dir = os.path.join(out_dir, "terminators")
 
     try:
         args = get_args()
-        input_dir: str = args.input_dir
+        input_dir = args.input_dir
+        max_iterations = args.max_features
+        dstream_nts = args.downstream_nucleotides
 
         files = find_files(input_dir)
 
@@ -393,7 +394,8 @@ def main() -> int:
         worker_func = functools.partial(
             process_genome,
             num_genomes=len(files),
-            out_dir=out_dir
+            out_dir=out_dir,
+            max_iterations=max_iterations
         )
 
         # COMPARE TO ANNOTATED THALIANA
@@ -402,12 +404,8 @@ def main() -> int:
         annotated_3utrs = pyfastx.Fasta("./TAIR10_3_utr_20101028.fa")
         predicted_3utrs = pyfastx.Fasta("out/3utrs/thaliana_3utrs.fa")
 
-        with open(os.path.join(out_dir, "filtered_gffs", "thaliana_filtered.gff"), 'r') as f:
+        with open(os.path.join(input_dir, "thaliana.gff"), 'r') as f:
             lines = f.readlines()
-
-        for annotated_3utr in annotated_3utrs:
-            root_id, _ = find_related_features(lines, annotated_3utr.name)
-            print(root_id)
 
         # process each genome in parallel
         with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
