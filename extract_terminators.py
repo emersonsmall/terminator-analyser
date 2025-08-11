@@ -1,9 +1,16 @@
 # gffread https://ccb.jhu.edu/software/stringtie/gff.shtml
 # pyfastx https://pypi.org/project/pyfastx/
 # TAIR 3'UTR source https://www.arabidopsis.org/download/list?dir=Sequences%2FTAIR10_blastsets
+# gene counts: https://www.ncbi.nlm.nih.gov/datasets/gene/taxon/81972/
 
 # TODO: replace gffread with a python library? (e.g. gffutils, pybedtools, BioPython) these may have more robust parsing and would make code cleaner
 # need to verify they have the same functionality
+
+# TODO add arg for max tolerance for 3'UTR differences for diff isoforms?
+
+# TODO: explore gffread options for CDS annotation for more robust parsing?
+
+# TODO: use ncbi CLI to retrieve genomes that user specifies?
 
 import os
 import sys
@@ -189,6 +196,7 @@ def filter_gff(feature_id: str, in_fpath: str, out_fpath: str) -> str:
     with open(in_fpath, 'r') as f:
         lines = f.readlines()
     
+    # TODO: optimise. pass f_map as arg, does f_map need to be built with new filtered file?
     f_map = build_feature_map(lines)
     root_id, line_idxs = find_related_features(lines, feature_id, f_map)
     
@@ -268,7 +276,7 @@ def get_transcripts(fasta_fpath: str, gff_fpath: str, out_dir: str, out_fpath: s
             features_removed.append(feature_removed)
 
 
-def get_post_cds(tscript_fpath: str, out_fpath: str, line_width: int = 70) -> None:
+def get_post_cds(tscript_fpath: str, out_fpath: str, line_width: int = 80) -> None:
     """
     
     """
@@ -328,8 +336,7 @@ def process_genome(file_pair: tuple[str, str], n: int, num_genomes: int, out_dir
     utrs_fpath = os.path.join(utrs_dir, genome_name + "_3utrs.fa")
     get_post_cds(tscript_fpath, utrs_fpath)
 
-    
-    # extract X nucleotides from the end of the sequence for full terminator
+    # TODO: extract X nucleotides from the end of the sequence for full terminator
     # USE --w-add <N> option. this modifies CDS= accordingly, can find 3'UTR by subtracting from the end
 
 
@@ -390,6 +397,32 @@ def main() -> int:
 
         os.makedirs(terminators_dir, exist_ok=True)
 
+        # COMPARE TO ANNOTATED THALIANA
+        # Sequences match for the example I checked manually !
+
+        # TAIR annotation has gene IDs, my 3utrs have rna transcript IDs
+
+        # each gene can have multiple RNA transcripts/RNA IDs for different isoforms/rna versions
+        
+        # right now my feature map only has base gene id, does not capture gene version suffix
+
+        # remember case sensitivity
+
+        # merge 3'UTRs of isoforms if they are the same/similar enough?
+
+        annotated_3utrs = pyfastx.Fasta("./TAIR10_3_utr_20101028.fa")
+        predicted_3utrs = pyfastx.Fasta("out/3utrs/thaliana_3utrs.fa")
+
+        with open(os.path.join(input_dir, "thaliana.gff"), 'r') as f:
+            lines = f.readlines()
+        
+        f_map = build_feature_map(lines)
+        for pred_3utr in predicted_3utrs:
+            rna_id = pred_3utr.name[:-5] # remove "_3utr" suffix
+            gene_id = f_map.get(rna_id, {})[0].get("parent")
+            gene_id = gene_id.split('-')[1] # remove "gene-" prefix
+            print(rna_id, gene_id)
+
         # worker function for multiprocessing
         worker_func = functools.partial(
             process_genome,
@@ -397,15 +430,6 @@ def main() -> int:
             out_dir=out_dir,
             max_iterations=max_iterations
         )
-
-        # COMPARE TO ANNOTATED THALIANA
-        # TODO: fix
-        # TAIR annotation has gene IDs, my _3utrs has rna IDs
-        annotated_3utrs = pyfastx.Fasta("./TAIR10_3_utr_20101028.fa")
-        predicted_3utrs = pyfastx.Fasta("out/3utrs/thaliana_3utrs.fa")
-
-        with open(os.path.join(input_dir, "thaliana.gff"), 'r') as f:
-            lines = f.readlines()
 
         # process each genome in parallel
         with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
