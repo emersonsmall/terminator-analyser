@@ -3,14 +3,14 @@
 # TAIR 3'UTR source https://www.arabidopsis.org/download/list?dir=Sequences%2FTAIR10_blastsets
 # gene counts: https://www.ncbi.nlm.nih.gov/datasets/gene/taxon/81972/
 
-# TODO: replace gffread with a python library? (e.g. gffutils, pybedtools, BioPython) these may have more robust parsing and would make code cleaner
-# need to verify they have the same functionality
+# TODO: replace gffread with a python library? (e.g. gffutils, pybedtools, BioPython)
 
 # TODO add arg for max tolerance for 3'UTR differences for diff isoforms?
 
-# TODO: explore gffread options for CDS annotation for more robust parsing?
+# TODO: explore gffread options for CDS=True annotation for more robust parsing?
 
-# TODO: use ncbi CLI to retrieve genomes that user specifies?
+# TODO: use ncbi API to retrieve given genomes/genus. still provide option to
+#       specify local files. check if files exist, if not, download them.
 
 import os
 import sys
