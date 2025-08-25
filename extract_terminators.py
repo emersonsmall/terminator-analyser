@@ -1,16 +1,19 @@
 # gffread https://ccb.jhu.edu/software/stringtie/gff.shtml
 # pyfastx https://pypi.org/project/pyfastx/
+
 # TAIR 3'UTR source https://www.arabidopsis.org/download/list?dir=Sequences%2FTAIR10_blastsets
 # gene counts: https://www.ncbi.nlm.nih.gov/datasets/gene/taxon/81972/
-
-# TODO: replace gffread with a python library? (e.g. gffutils, pybedtools, BioPython)
 
 # TODO add arg for max tolerance for 3'UTR differences for diff isoforms?
 
 # TODO: explore gffread options for CDS=True annotation for more robust parsing?
 
 # TODO: use ncbi API to retrieve given genomes/genus. still provide option to
-#       specify local files. check if files exist, if not, download them.
+#       specify local files. check if files exist, if not, download them. Can check against filenames that api provides
+
+# TODO: pre-process/filter GFF files to remove problematic features before running gffread
+
+# TODO: runs out of memory for thaliana when including 50 nts downstream
 
 import os
 import sys
@@ -24,13 +27,19 @@ import textwrap
 # External libraries
 import pyfastx
 
+OUT_DIR = os.path.join(os.getcwd(), "out")
+FILTERED_GFFS_DIR = os.path.join(OUT_DIR, "filtered_gffs")
+TSCRIPTS_DIR = os.path.join(OUT_DIR, "transcripts")
+TERMINATORS_DIR = os.path.join(OUT_DIR, "terminators")
+UTRS_DIR = os.path.join(OUT_DIR, "3utrs")
+
 # --- Custom Exceptions ---
 class TerminatorExtractionError(Exception):
     """Base exception for this script."""
     pass
 
 class GFFParsingError(TerminatorExtractionError):
-    """Exception for errors in GFF parsing."""
+    """Exception for errors parsing GFF files."""
     pass
 
 class FileProcessingError(TerminatorExtractionError):
@@ -43,7 +52,7 @@ def get_args() -> argparse.Namespace:
     Parses command line arguments using argparse.
     """
     parser = argparse.ArgumentParser(
-        description="Extract terminators from GFF files and their corresponding FASTA files."
+        description="Extract terminators for the given genomes/genus."
     )
     parser.add_argument("input_dir", help="Path to the input folder containing FASTA and GFF files.")
     parser.add_argument(
@@ -66,7 +75,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument(
         "--separate-3utrs",
         action="store_true",
-        help="Extract 3' UTRs separately (default: False)."
+        help="Extract 3'UTRs separately (default: False)."
     )
     parser.add_argument(
         "--equal-length",
@@ -82,27 +91,27 @@ def get_args() -> argparse.Namespace:
     return args
 
 
-def parse_attributes(attributes: str) -> dict[str, str]:
+def parse_gff_attrs(attrs: str) -> dict[str, str]:
     """
-    Parses a GFF file attribute string into a dictionary.
+    Parses a GFF feature attribute string into a dictionary.
     Args:
-        attributes (str): The attribute string from a GFF file.
+        attrs (str): The attribute string from a GFF file.
     Returns:
         dict[str, str]: A dictionary mapping attribute names to their values.
     """
-    assert isinstance(attributes, str), f"Invalid type for parameter 'attributes'"
+    assert isinstance(attrs, str), f"Invalid type for parameter 'attrs'"
 
-    attrs = {}
-    for attr in attributes.split(';'):
+    attrs_dict = {}
+    for attr in attrs.split(';'):
         if '=' in attr:
             key, val = attr.split('=', 1)
-            attrs[key.strip()] = val.strip()
-    return attrs
+            attrs_dict[key.strip()] = val.strip()
+    return attrs_dict
 
 
 def build_feature_map(gff_lines: list[str]) -> dict[str, list[dict[str, int | str | None]]]:
     """
-    Creates a dictionary mapping each feature ID to its line index and parent. Handles duplicate feature IDs.
+    Creates a dictionary mapping each feature ID to its line index and parent feature ID. Handles duplicate feature IDs.
     Args:
         gff_lines (list[str]): A list of strings where each string is a line from a gff file.
     Returns:
@@ -118,7 +127,7 @@ def build_feature_map(gff_lines: list[str]) -> dict[str, list[dict[str, int | st
 
         try:
             # 9th column contains attribute string
-            attrs = parse_attributes(line.split('\t')[8])
+            attrs = parse_gff_attrs(line.split('\t')[8])
             f_id = attrs.get("ID")
 
             if f_id:
@@ -144,7 +153,7 @@ def find_related_features(gff_lines: list[str], feature_id: str, feature_map: di
     Args:
         gff_lines (list[str]): A list of strings where each string is a line from a gff file.
         feature_id (str): The ID of the feature to search for.
-        feature_map (dict[str, list[dict[str, int | str | None]]]): A dictionary mapping each feature ID to a list of its lines with line index and parent attribute.
+        feature_map (dict[str, list[dict[str, int | str | None]]]): A dictionary mapping each feature ID to a list of lines.
     Returns:
         tuple[str, list[int]]: The root id of the feature, and a sorted list of all line indices related to the feature.
     """
@@ -166,20 +175,20 @@ def find_related_features(gff_lines: list[str], feature_id: str, feature_map: di
     
     root_id = get_root(feature_id)
 
-    common_root_ids = [
+    f_ids_with_common_root = [
         f_id for f_id in feature_map
         if get_root(f_id) == root_id
     ]
 
-    common_root_idxs = []
-    for f_id in common_root_ids:
+    line_idxs = []
+    for f_id in f_ids_with_common_root:
         for feature in feature_map[f_id]:
-            common_root_idxs.append(feature["idx"])
+            line_idxs.append(feature["idx"])
 
-    return root_id, sorted(common_root_idxs)
+    return root_id, sorted(line_idxs)
 
 
-def filter_gff(feature_id: str, in_fpath: str, out_fpath: str) -> str:
+def filter_gff(gff_lines: list[str], feature_id: str, in_fpath: str, out_fpath: str, feature_map: dict) -> str:
     """
     Filters a GFF file to remove all lines related to a given feature ID.
     Args:
@@ -189,34 +198,25 @@ def filter_gff(feature_id: str, in_fpath: str, out_fpath: str) -> str:
     Returns:
         str: The root ID (top-level feature ID i.e., gene ID) of the removed feature.
     """
-    assert os.path.isfile(in_fpath), f"Input file {in_fpath} does not exist."
     assert isinstance(feature_id, str), f"Invalid type for parameter 'f_id'"
     assert isinstance(out_fpath, str), f"Invalid type for parameter 'out_path'"
-
-    with open(in_fpath, 'r') as f:
-        lines = f.readlines()
     
-    # TODO: optimise. pass f_map as arg, does f_map need to be built with new filtered file?
-    f_map = build_feature_map(lines)
-    root_id, line_idxs = find_related_features(lines, feature_id, f_map)
+    root_id, line_idxs = find_related_features(gff_lines, feature_id, feature_map)
     
-    lines_to_keep = [line for i, line in enumerate(lines) if i not in line_idxs]
+    lines_to_keep = [line for i, line in enumerate(gff_lines) if i not in line_idxs]
 
     with open(out_fpath, 'w') as f:
         f.writelines(lines_to_keep)
-
-    print(f"{len(line_idxs)} line/s removed from '{in_fpath}':")
     
     return root_id
 
 
-def get_transcripts(fasta_fpath: str, gff_fpath: str, out_dir: str, out_fpath: str, max_iterations: int) -> None:
+def get_transcripts(fasta_fpath: str, gff_fpath: str, out_fpath: str, max_iterations: int, dstream_nts: int) -> None:
     """
     Extracts transcripts for the specified fasta file and gff file.
     """
     assert os.path.isfile(fasta_fpath), f"FASTA file {fasta_fpath} does not exist."
     assert os.path.isfile(gff_fpath), f"GFF file {gff_fpath} does not exist."
-    assert os.path.isdir(out_dir), f"Output directory {out_dir} does not exist or is not a directory."
     assert isinstance(out_fpath, str), f"Invalid type for parameter 'out_fname'"
 
     gffread_errs = ("Error parsing", "GffObj::getSpliced() error: improper genomic coordinate")
@@ -224,8 +224,7 @@ def get_transcripts(fasta_fpath: str, gff_fpath: str, out_dir: str, out_fpath: s
     genome_name = os.path.basename(fasta_fpath).split('.')[0]
 
     filtered_fname = genome_name + "_filtered.gff"
-    filtered_gffs_dir = os.path.join(out_dir, "filtered_gffs")
-    filtered_gff_fpath = os.path.join(filtered_gffs_dir, filtered_fname)
+    filtered_gff_fpath = os.path.join(FILTERED_GFFS_DIR, filtered_fname)
     features_removed: list[str] = []
 
     for i in range(max_iterations):
@@ -240,6 +239,7 @@ def get_transcripts(fasta_fpath: str, gff_fpath: str, out_dir: str, out_fpath: s
                     "gffread",
                     "-w", out_fpath,
                     "-g", fasta_fpath,
+                    #"--w-add", str(dstream_nts),
                     gff_fpath
                 ],
                 capture_output=True, 
@@ -256,63 +256,67 @@ def get_transcripts(fasta_fpath: str, gff_fpath: str, out_dir: str, out_fpath: s
         except subprocess.CalledProcessError as err:
             print(f"\nError running gffread for '{genome_name}':\n{err.stderr}")
 
-            is_parsing_error = err.stderr.startswith(gffread_errs[0])
-            is_improper_coord_error = err.stderr.startswith(gffread_errs[1])
+            is_parsing_err = err.stderr.startswith(gffread_errs[0])
+            is_improper_coord_err = err.stderr.startswith(gffread_errs[1])
 
-            if is_parsing_error:
+            if is_parsing_err:
                 gff_line = err.stderr.split('\n')[1]
-                attrs = parse_attributes(gff_line.split('\t')[-1])
+                attrs = parse_gff_attrs(gff_line.split('\t')[-1])
                 id = attrs.get("ID")
-            elif is_improper_coord_error:
+            elif is_improper_coord_err:
                 id = err.stderr.split(' ')[-1].strip()
             else:
                 raise GFFParsingError(
                     f"Unexpected error parsing GFF file '{gff_fpath}': {err.stderr}"
                 )
 
-            os.makedirs(filtered_gffs_dir, exist_ok=True)
-            feature_removed = filter_gff(id, gff_fpath, filtered_gff_fpath)
+            os.makedirs(FILTERED_GFFS_DIR, exist_ok=True)
+            with open(gff_fpath, 'r') as f:
+                gff_lines = f.readlines()
+            
+            f_map = build_feature_map(gff_lines)
+            feature_removed = filter_gff(gff_lines, id, gff_fpath, filtered_gff_fpath, f_map)
             
             features_removed.append(feature_removed)
 
 
-def get_post_cds(tscript_fpath: str, out_fpath: str, line_width: int = 80) -> None:
+def get_post_cds(tscripts_fpath: str, out_fpath: str) -> None:
     """
     
     """
-    assert os.path.isfile(tscript_fpath), f"FASTA file '{tscript_fpath}' does not exist."
+    assert os.path.isfile(tscripts_fpath), f"FASTA file '{tscripts_fpath}' does not exist."
     assert isinstance(out_fpath, str), f"Invalid type for parameter 'out_fpath'"
 
-    tscripts = pyfastx.Fasta(tscript_fpath)
-    utr_count = 0
+    tscripts = pyfastx.Fasta(tscripts_fpath)
+    count = 0
+
+    output_records = []
+    for record in tscripts:
+        cds_match = re.search(r'CDS=(\d+)-(\d+)', record.description)
+
+        if cds_match:
+            cds_end_pos = int(cds_match.group(2))
+            terminator_seq = record.seq[cds_end_pos:]
+
+            if terminator_seq:
+                id = record.name
+                wrapped_seq = textwrap.fill(terminator_seq, width=80)
+                output_records.append(f">{id}\n{wrapped_seq}\n")
+                count += 1
+    
+    print(f"Extracted {count} terminators from {len(tscripts)} transcripts to '{out_fpath}'.")
 
     with open(out_fpath, 'w') as out_f:
-        for record in tscripts:
-            cds_match = re.search(r'CDS=(\d+)-(\d+)', record.description)
-
-            if cds_match:
-                cds_end_pos = int(cds_match.group(2))
-                utr_seq = record.seq[cds_end_pos:]
-
-                if utr_seq:
-                    id = record.name.split()[0]  # Get the ID from the FASTA header
-
-                    wrapped_utr_seq = textwrap.fill(utr_seq, width=line_width)
-
-                    out_f.write(f">{id}_3utr\n{wrapped_utr_seq}\n")
-                    utr_count += 1
-    
-    print(f"Extracted {utr_count} 3'UTRs from {len(tscripts)} transcripts to '{out_fpath}'.")
+        out_f.writelines(output_records)
 
 
-def process_genome(file_pair: tuple[str, str], n: int, num_genomes: int, out_dir: str, max_iterations: int) -> None:
+def process_genome(file_pair: tuple[str, str], n: int, num_genomes: int, max_iterations: int, dstream_nts: int) -> None:
     """
     Processes a single genome.
     Args:
         file_pair (tuple[str, str]): A tuple containing the fasta and gff file paths for a single genome.
         n (int): The current genome number being processed.
         num_genomes (int): The total number of genomes to process.
-        out_dir (str): The output directory where results will be saved.
     """
     assert isinstance(file_pair, tuple), f"Invalid type for parameter 'file_pair'"
     assert len(file_pair) == 2, f"Invalid length for parameter 'file_pair', expected 2 elements."
@@ -325,19 +329,15 @@ def process_genome(file_pair: tuple[str, str], n: int, num_genomes: int, out_dir
     print(f"\nProcessing genome '{genome_name}' ({n} of {num_genomes})...")
 
     print(f"Extracting transcripts for '{genome_name}'...")
-    tscripts_dir = os.path.join(out_dir, "transcripts")
-    os.makedirs(tscripts_dir, exist_ok=True)
-    tscript_fpath = os.path.join(tscripts_dir, genome_name + "_transcripts.fa")
-    get_transcripts(fasta, gff, out_dir, tscript_fpath, max_iterations)
+    os.makedirs(TSCRIPTS_DIR, exist_ok=True)
+    tscripts_fpath = os.path.join(TSCRIPTS_DIR, genome_name + "_transcripts.fa")
+    get_transcripts(fasta, gff, tscripts_fpath, max_iterations, dstream_nts)
 
-    # extract 3'UTRs from transcripts
-    utrs_dir = os.path.join(out_dir, "3utrs")
-    os.makedirs(utrs_dir, exist_ok=True)
-    utrs_fpath = os.path.join(utrs_dir, genome_name + "_3utrs.fa")
-    get_post_cds(tscript_fpath, utrs_fpath)
-
-    # TODO: extract X nucleotides from the end of the sequence for full terminator
-    # USE --w-add <N> option. this modifies CDS= accordingly, can find 3'UTR by subtracting from the end
+    # extract terminators from transcripts
+    print(f"Extracting terminator sequences for '{genome_name}'...")
+    os.makedirs(TERMINATORS_DIR, exist_ok=True)
+    terminators_fpath = os.path.join(TERMINATORS_DIR, genome_name + "_terminators.fa")
+    get_post_cds(tscripts_fpath, terminators_fpath)
 
 
 def find_files(dir: str) -> list[tuple[str, str]]:
@@ -384,9 +384,6 @@ def main() -> int:
     exit_success = 0
     exit_failure = 1
 
-    out_dir = "out" # TODO: move into process_genome?
-    terminators_dir = os.path.join(out_dir, "terminators")
-
     try:
         args = get_args()
         input_dir = args.input_dir
@@ -395,40 +392,12 @@ def main() -> int:
 
         files = find_files(input_dir)
 
-        os.makedirs(terminators_dir, exist_ok=True)
-
-        # COMPARE TO ANNOTATED THALIANA
-        # Sequences match for the example I checked manually !
-
-        # TAIR annotation has gene IDs, my 3utrs have rna transcript IDs
-
-        # each gene can have multiple RNA transcripts/RNA IDs for different isoforms/rna versions
-        
-        # right now my feature map only has base gene id, does not capture gene version suffix
-
-        # remember case sensitivity
-
-        # merge 3'UTRs of isoforms if they are the same/similar enough?
-
-        annotated_3utrs = pyfastx.Fasta("./TAIR10_3_utr_20101028.fa")
-        predicted_3utrs = pyfastx.Fasta("out/3utrs/thaliana_3utrs.fa")
-
-        with open(os.path.join(input_dir, "thaliana.gff"), 'r') as f:
-            lines = f.readlines()
-        
-        f_map = build_feature_map(lines)
-        for pred_3utr in predicted_3utrs:
-            rna_id = pred_3utr.name[:-5] # remove "_3utr" suffix
-            gene_id = f_map.get(rna_id, {})[0].get("parent")
-            gene_id = gene_id.split('-')[1] # remove "gene-" prefix
-            print(rna_id, gene_id)
-
         # worker function for multiprocessing
         worker_func = functools.partial(
             process_genome,
             num_genomes=len(files),
-            out_dir=out_dir,
-            max_iterations=max_iterations
+            max_iterations=max_iterations,
+            dstream_nts=dstream_nts
         )
 
         # process each genome in parallel
