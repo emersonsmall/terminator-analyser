@@ -4,8 +4,6 @@
 # TAIR 3'UTR source https://www.arabidopsis.org/download/list?dir=Sequences%2FTAIR10_blastsets
 # gene counts: https://www.ncbi.nlm.nih.gov/datasets/gene/taxon/81972/
 
-# TODO add arg for max tolerance for 3'UTR differences for diff isoforms?
-
 # TODO: explore gffread options for CDS=True annotation for more robust parsing?
 
 # TODO: use ncbi API to retrieve given genomes/genus. still provide option to
@@ -13,7 +11,7 @@
 
 # TODO: pre-process/filter GFF files to remove problematic features before running gffread
 
-# TODO: runs out of memory for thaliana when including 50 nts downstream
+# TODO: runs out of memory for thaliana when including 50 nts downstream and problem num terminators extracted drops dramatically
 
 import os
 import sys
