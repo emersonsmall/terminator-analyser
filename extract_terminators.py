@@ -211,13 +211,12 @@ def filter_gff(gff_lines: list[str], feature_id: str, in_fpath: str, out_fpath: 
     return root_id
 
 
-def get_transcripts(fasta_fpath: str, gff_fpath: str, out_dir: str, out_fpath: str, max_iterations: int, dstream_nts: int) -> None:
+def get_transcripts(fasta_fpath: str, gff_fpath: str, out_fpath: str, max_iterations: int, dstream_nts: int) -> None:
     """
     Extracts transcripts for the specified fasta file and gff file.
     """
     assert os.path.isfile(fasta_fpath), f"FASTA file {fasta_fpath} does not exist."
     assert os.path.isfile(gff_fpath), f"GFF file {gff_fpath} does not exist."
-    assert os.path.isdir(out_dir), f"Output directory {out_dir} does not exist or is not a directory."
     assert isinstance(out_fpath, str), f"Invalid type for parameter 'out_fname'"
 
     gffread_errs = ("Error parsing", "GffObj::getSpliced() error: improper genomic coordinate")
@@ -332,7 +331,7 @@ def process_genome(file_pair: tuple[str, str], n: int, num_genomes: int, max_ite
     print(f"Extracting transcripts for '{genome_name}'...")
     os.makedirs(TSCRIPTS_DIR, exist_ok=True)
     tscripts_fpath = os.path.join(TSCRIPTS_DIR, genome_name + "_transcripts.fa")
-    get_transcripts(fasta, gff, OUT_DIR, tscripts_fpath, max_iterations, dstream_nts)
+    get_transcripts(fasta, gff, tscripts_fpath, max_iterations, dstream_nts)
 
     # extract terminators from transcripts
     print(f"Extracting terminator sequences for '{genome_name}'...")
