@@ -24,6 +24,7 @@ import textwrap
 
 # External libraries
 import pyfastx
+import gffutils
 
 OUT_DIR = os.path.join(os.getcwd(), "out")
 FILTERED_GFFS_DIR = os.path.join(OUT_DIR, "filtered_gffs")
@@ -272,7 +273,7 @@ def get_transcripts(fasta_fpath: str, gff_fpath: str, out_fpath: str, max_iterat
             with open(gff_fpath, 'r') as f:
                 gff_lines = f.readlines()
             
-            f_map = build_feature_map(gff_lines)
+            f_map = build_feature_map(gff_lines) # TODO: FIX, this is still built each iteration, should only need to be built once
             feature_removed = filter_gff(gff_lines, id, gff_fpath, filtered_gff_fpath, f_map)
             
             features_removed.append(feature_removed)
