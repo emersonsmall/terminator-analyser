@@ -4,8 +4,6 @@
 # TAIR 3'UTR source https://www.arabidopsis.org/download/list?dir=Sequences%2FTAIR10_blastsets
 # gene counts: https://www.ncbi.nlm.nih.gov/datasets/gene/taxon/81972/
 
-# TODO: explore gffread options for CDS=True annotation for more robust parsing?
-
 # TODO: use ncbi API to retrieve given genomes/genus. still provide option to
 #       specify local files. check if files exist, if not, download them. Can check against filenames that api provides
 

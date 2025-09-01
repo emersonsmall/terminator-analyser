@@ -1,5 +1,8 @@
+import gffutils
+
 def main():
-    # test gffutils with Arabidopsis thaliana
+    gffutils.create_db("../genomes/thaliana.gff", dbfn="thaliana_gff.db", keep_order=True, merge_strategy="create_unique", sort_attribute_values=True)
+    print("Database created.")
     return
 
 if __name__ == "__main__":
