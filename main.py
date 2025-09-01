@@ -1,6 +1,6 @@
+
 def main():
-    # test gffutils with Arabidopsis thaliana
-    return
+    pass
 
 if __name__ == "__main__":
     main()
