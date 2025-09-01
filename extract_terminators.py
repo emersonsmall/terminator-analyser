@@ -7,8 +7,6 @@
 # TODO: use ncbi API to retrieve given genomes/genus. still provide option to
 #       specify local files. check if files exist, if not, download them. Can check against filenames that api provides
 
-# TODO: runs out of memory for thaliana when including 50 nts downstream and problem num terminators extracted drops dramatically
-
 import os
 import sys
 import concurrent.futures
@@ -107,35 +105,41 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, dstrea
     fasta = pyfaidx.Fasta(fasta_fpath)
     db = gffutils.FeatureDB(db_path)
     output_records = []
-    no_utrs_count = 0
+    skipped = 0
 
     for tscript in db.features_of_type("mRNA", order_by="start"):
         try:
             cds_features = list(db.children(tscript, featuretype="CDS", order_by="start"))
             if not cds_features:
+                skipped += 1
                 continue
 
-            chrom_len = len(fasta[tscript.chrom])
-
             if tscript.strand == "+":
-                term_start = cds_features[-1].end # 0 based
-                term_end = tscript.end + dstream_nts
+                cds_end = cds_features[-1].end
+
+                if tscript.end - cds_end <= 0:
+                    skipped += 1
+                    continue
+                
+                start_idx = cds_end
+                end_idx = tscript.end + dstream_nts
             elif tscript.strand == "-":
-                term_start = tscript.start - dstream_nts # 0 based
-                term_end = cds_features[0].start
+                cds_start = cds_features[0].start
+
+                if cds_start - tscript.start <= 0:
+                    skipped += 1
+                    continue
+
+                start_idx = max(0, (tscript.start - dstream_nts) - 1)
+                end_idx = cds_start - 1
             else:
                 print(f"WARNING: unknown strand '{tscript.strand}' for feature '{tscript.id}' in '{genome_name}'", file=sys.stderr)
                 continue
-            
-            if term_end - term_start <= 0:
-                no_utrs_count += 1
-                continue
 
-            term_seq = fasta[tscript.chrom][term_start : term_end]
+            term_seq = fasta[tscript.chrom][start_idx : end_idx]
             if tscript.strand == "-":
-                term_seq = term_seq.reverse.complement.seq
-            else:
-                term_seq = term_seq.seq
+                term_seq = term_seq.reverse.complement
+            term_seq = term_seq.seq
 
             if term_seq:
                 display_id = tscript.id
@@ -145,6 +149,9 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, dstrea
                 header = f">{display_id} | {tscript.chrom}:{tscript.start}-{tscript.end}({tscript.strand})"
                 wrapped_seq = textwrap.fill(term_seq, width=80)
                 output_records.append(f"{header}\n{wrapped_seq}\n")
+            else:
+                skipped += 1
+                continue
 
         except Exception as e:
             print(f"WARNING: could not process feature '{tscript.id}' in '{genome_name}': {e}", file=sys.stderr)
@@ -153,8 +160,7 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, dstrea
     with open(out_fpath, 'w') as out_f:
         out_f.writelines(output_records)
     
-    print(f"Extracted {len(output_records)} terminator sequences from '{genome_name}'\n\
-          (skipped {no_utrs_count} transcripts without 3'UTRs)")
+    print(f"Extracted {len(output_records)} terminator sequences from '{genome_name}'\nskipped {skipped} transcripts")
 
 
 def find_files(dir: str) -> list[tuple[str, str]]:
