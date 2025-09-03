@@ -1,3 +1,5 @@
+# TAIR 3'UTR source: https://www.arabidopsis.org/download/list?dir=Sequences%2FAraport11_blastsets
+
 import sys
 import argparse
 import pyfaidx

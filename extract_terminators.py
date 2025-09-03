@@ -1,7 +1,6 @@
 # gffutils https://anaconda.org/bioconda/gffutils
 # pyfaidx https://anaconda.org/bioconda/pyfaidx
 
-# TAIR 3'UTR source 
 # gene counts: https://www.ncbi.nlm.nih.gov/datasets/gene/taxon/81972/
 
 # TODO: use ncbi API to retrieve given genomes/genus. still provide option to
@@ -20,7 +19,6 @@ import gffutils
 
 OUT_DIR = "out"
 TERMINATORS_DIR = os.path.join(OUT_DIR, "terminators")
-UTRS_DIR = os.path.join(OUT_DIR, "3utrs")
 DB_DIR = os.path.join(OUT_DIR, "gff_dbs")
 
 # --- Exceptions ---
@@ -50,11 +48,6 @@ def get_args() -> argparse.Namespace:
         type=int,
         default=50,
         help="Number of nucleotides to extract downstream of the terminator (default: 50)."
-    )
-    parser.add_argument(
-        "--3utrs",
-        action="store_true",
-        help="Extract 3'UTRs separately (default: False)."
     )
     parser.add_argument(
         "--equal-length",
