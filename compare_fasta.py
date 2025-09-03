@@ -62,12 +62,15 @@ def main():
         else:
             mismatches[record_id] = (fill(ref, width=80), fill(query, width=80))
     
-    # Summary
+    num_mismatches = len(mismatches)
+    num_missing_from_q = len(missing_from_query)
+    num_common = len(common_ids)
+
     print("\nSUMMARY")
-    print(f"Records found in both files: {len(common_ids)}")
-    print(f" - Matches: {matches}")
-    print(f" - Mismatches: {len(mismatches)}")
-    print(f"Records only in reference FASTA: {len(missing_from_query)}")
+    print(f"Records found in both files: {num_common}")
+    print(f" - Matches: {matches} ({matches / num_common * 100:.2f}%)")
+    print(f" - Mismatches: {num_mismatches} ({num_mismatches / num_common * 100:.2f}%)")
+    print(f"Records only in reference FASTA: {num_missing_from_q}")
     print(f"Records only in query FASTA: {len(extra_in_query)}")
     
     if mismatches:
@@ -78,15 +81,15 @@ def main():
             print(f"   Reference: \n{mismatches[record_id][0]}")
             print(f"   Query    : \n{mismatches[record_id][1]}")
             print("-" * 30)
-        if len(mismatches) > 20:
-            print(f" ... and {len(mismatches) - 20} more mismatches.")
+        if num_mismatches > 20:
+            print(f" ... and {num_mismatches - 20} more mismatches.")
         
     if missing_from_query:
         print("\nRecords only in reference FASTA:")
         for record_id in sorted(list(missing_from_query))[:20]:
             print(f" - {record_id}")
-        if len(missing_from_query) > 20:
-            print(f" ... and {len(missing_from_query) - 20} more records.")
+        if num_missing_from_q > 20:
+            print(f" ... and {num_missing_from_q - 20} more records.")
 
 if __name__ == "__main__":
     main()

@@ -1,7 +1,7 @@
 # gffutils https://anaconda.org/bioconda/gffutils
 # pyfaidx https://anaconda.org/bioconda/pyfaidx
 
-# TAIR 3'UTR source https://www.arabidopsis.org/download/list?dir=Sequences%2FTAIR10_blastsets
+# TAIR 3'UTR source 
 # gene counts: https://www.ncbi.nlm.nih.gov/datasets/gene/taxon/81972/
 
 # TODO: use ncbi API to retrieve given genomes/genus. still provide option to
