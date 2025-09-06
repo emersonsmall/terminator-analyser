@@ -1,10 +1,7 @@
-# gffutils https://anaconda.org/bioconda/gffutils
-# pyfaidx https://anaconda.org/bioconda/pyfaidx
-
-# gene counts: https://www.ncbi.nlm.nih.gov/datasets/gene/taxon/81972/
-
 # TODO: use ncbi API to retrieve given genomes/genus. still provide option to
 #       specify local files. check if files exist, if not, download them. Can check against filenames that api provides
+
+# TODO: add flag for DB creation, delete DBs on error if not created
 
 import os
 import sys
@@ -14,8 +11,8 @@ import textwrap
 from collections import defaultdict
 
 # External libraries
-import pyfaidx
-import gffutils
+import pyfaidx  # https://anaconda.org/bioconda/pyfaidx
+import gffutils # https://anaconda.org/bioconda/gffutils
 
 OUT_DIR = "out"
 TERMINATORS_DIR = os.path.join(OUT_DIR, "terminators")
@@ -212,9 +209,6 @@ def worker(args):
 
 
 def main() -> int:
-    exit_success = 0
-    exit_failure = 1
-
     try:
         args = get_args()
         input_dir = args.input_dir
@@ -230,16 +224,16 @@ def main() -> int:
 
     except (GFFParsingError, FileProcessingError, OSError) as e:
         print(f"\nERROR: {e}", file=sys.stderr)
-        return exit_failure
+        return 1
     except KeyboardInterrupt:
         print("\nInterrupted by user.", file=sys.stderr)
-        return exit_failure
+        return 1
     except Exception as e:
         print(f"\nAn unexpected error occurred: {e}", file=sys.stderr)
-        return exit_failure
+        return 1
     
     print("\nFINISHED")
-    return exit_success
+    return 0
 
 
 if __name__ == "__main__":
