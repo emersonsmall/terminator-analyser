@@ -6,12 +6,13 @@ import glob
 import textwrap
 import pyfaidx
 
-NUE_START = 35 # abs val, actually -35
-NUE_END = 5
-CE_HALF_WIDTH = 15
+# TODO: add arg for minimum 3'UTR length??
+
+NUE_START = -35 # -1 is the last nt of the 3'UTR
+NUE_END = -5
+CE_WIDTH = 30
 
 def run_command(command: list[str]):
-    """Helper function to run a subprocess with the given command and handle errors."""
     print("Running command:", " ".join(command))
     try:
         process = subprocess.run(
@@ -79,6 +80,22 @@ def print_report(region_name: str, kmer_counts: list, k_size: int):
         rank = i + 1
         print(f"{rank:<5} | {kmer:<{k_size + 2}} | {count:>10,}")
 
+
+def generate_tiling_kmers(sequences: list[str], kmer_size: int) -> list[str]:
+    """
+    Generates k-mers from a list of sequences using a non-overlapping tiling approach.
+    Returns a list of formatted FASTA records.
+    """
+    kmer_records = []
+    kmer_id_counter = 0
+    for seq in sequences:
+        for i in range(0, len(seq) - kmer_size + 1, kmer_size):
+            kmer = seq[i : i + kmer_size]
+            kmer_records.append(f">kmer_{kmer_id_counter}\n{kmer}\n")
+            kmer_id_counter += 1
+    return kmer_records
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=textwrap.dedent("""
@@ -92,74 +109,71 @@ def main():
         help="Number of downstream nucleotides included in the terminators (default: 50)."
     )
     parser.add_argument(
-        "-N", "--top_n", type=int, default=50,
+        "-N", "--top-n", type=int, default=50,
         help="The number of most common k-mers to report (default: 50)."
     )
     parser.add_argument(
-        "-k", "--kmer_size", type=int, default=6,
+        "-k", "--kmer-size", type=int, default=6,
         help="The size of the k-mers to analyze (default: 6)."
     )
     args = parser.parse_args()
-    input_dir = args.input_dir
-    top_n = args.top_n
-    kmer_size = args.kmer_size
-    dstream_nts = args.downstream_nts
 
     # Find all fasta files
-    fasta_files = glob.glob(os.path.join(input_dir, "*_terminators.fa"))
+    fasta_files = glob.glob(os.path.join(args.input_dir, "*_terminators.fa"))
     if not fasta_files:
-        print(f"ERROR: No '*_terminators.fa' files found in directory '{input_dir}'", file=sys.stderr)
+        print(f"ERROR: No '*_terminators.fa' files found in directory '{args.input_dir}'", file=sys.stderr)
         sys.exit(1)
-    
     print(f"Found {len(fasta_files)} FASTA files")
     
-    ce_fasta_path = "ce_regions.fa"
-    nue_fasta_path = "nue_regions.fa"
+    # Extract all CE and NUE regions into separate temp files
+    ce_fasta_path = "all_CEs.fa"
+    nue_fasta_path = "all_NUEs.fa"
     print(f"Extracting CE and NUE regions")
 
-    ce_records = []
-    nue_records = []
+    ce_seqs = []
+    nue_seqs = []
     skipped = 0
+    num_terminators = 0
 
     for fasta_file in fasta_files:
         fa_records = pyfaidx.Fasta(fasta_file, as_raw=True)
         for record in fa_records:
+            num_terminators += 1
+
             seq = str(record).upper()
             total_len = len(seq)
-            utr_len = total_len - dstream_nts
+            utr_len = total_len - args.downstream_nts
 
             # Slice NUE window
             if utr_len >= abs(NUE_START):
-                nue_start = utr_len - NUE_START
-                nue_end = utr_len - NUE_END
-                nue_seq = seq[nue_start:nue_end]
-                nue_records.append(f">{record.name}_NUE\n{nue_seq}\n")
+                nue_start = utr_len - abs(NUE_START)
+                nue_end = utr_len - abs(NUE_END)
+                nue_seq = seq[nue_start - 1 : nue_end]
+                nue_seqs.append(nue_seq)
             else:
                 skipped += 1
                 continue
 
             # Slice CE window
-            if total_len >= (CE_HALF_WIDTH * 2) and utr_len >= CE_HALF_WIDTH:
-                ce_start = utr_len - CE_HALF_WIDTH
-                ce_end = utr_len + CE_HALF_WIDTH
-                ce_seq = seq[ce_start:ce_end]
-                ce_records.append(f">{record.name}_CE\n{ce_seq}\n")
+            ce_start = utr_len - CE_WIDTH // 2
+            ce_end = utr_len + CE_WIDTH // 2
+            ce_seq = seq[ce_start - 1 : ce_end]
+            ce_seqs.append(ce_seq)
 
+    ce_records = generate_tiling_kmers(ce_seqs, args.kmer_size)
+    nue_records = generate_tiling_kmers(nue_seqs, args.kmer_size)
 
     with open(ce_fasta_path, "w") as f:
         f.writelines(ce_records)
     with open(nue_fasta_path, "w") as f:
         f.writelines(nue_records)
 
-    print(f"Analysing CE regions")
-    top_ce_kmers = get_top_kmers(ce_fasta_path, kmer_size, top_n)
+    top_ce_kmers = get_top_kmers(ce_fasta_path, args.kmer_size, args.top_n)
+    top_nue_kmers = get_top_kmers(nue_fasta_path, args.kmer_size, args.top_n)
 
-    print(f"Analysing NUE regions")
-    top_nue_kmers = get_top_kmers(nue_fasta_path, kmer_size, top_n)
-
-    print(f"\n{skipped} terminator sequences skipped due to insufficient 3'UTR length")
-    print_report("CE", top_ce_kmers, kmer_size)
-    print_report("NUE", top_nue_kmers, kmer_size)
+    print(f"\n{skipped} of {num_terminators} ({(skipped/num_terminators * 100):.2f}%) terminator sequences skipped due to insufficient 3'UTR length")
+    print_report("CE", top_ce_kmers, args.kmer_size)
+    print_report("NUE", top_nue_kmers, args.kmer_size)
 
     os.remove(ce_fasta_path)
     os.remove(nue_fasta_path)

@@ -211,12 +211,10 @@ def worker(args):
 def main() -> int:
     try:
         args = get_args()
-        input_dir = args.input_dir
-        dstream_nts = args.downstream_nts
 
-        file_pairs = find_files(input_dir)
+        file_pairs = find_files(args.input_dir)
 
-        tasks = [(pair[0], pair[1], dstream_nts) for pair in file_pairs]
+        tasks = [(pair[0], pair[1], args.downstream_nts) for pair in file_pairs]
 
         # process each genome in parallel
         with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
