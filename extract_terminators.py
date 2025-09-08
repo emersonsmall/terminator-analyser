@@ -95,41 +95,69 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, dstrea
     fasta = pyfaidx.Fasta(fasta_fpath)
     db = gffutils.FeatureDB(db_path)
     output_records = []
-    skipped = 0
+    skipped_count = 0
 
+    # All coordinates are 1-based, and modified as necessary in slice operations
     for tscript in db.features_of_type("mRNA", order_by="start"):
         try:
             cds_features = list(db.children(tscript, featuretype="CDS", order_by="start"))
             if not cds_features:
-                skipped += 1
+                skipped_count += 1
                 continue
+            
+            exon_features = list(db.children(tscript, featuretype="exon", order_by="start"))
+            if not exon_features:
+                skipped_count += 1
+                continue
+
+            term_seq = ""
+            utr_parts = []
 
             if tscript.strand == "+":
                 cds_end = cds_features[-1].end
 
-                if tscript.end - cds_end <= 0:
-                    skipped += 1
-                    continue
+                # Get all exons after the CDS end
+                for exon in exon_features:
+                    if exon.end > cds_end:
+                        utr_start = max(exon.start, cds_end + 1) # One exon can contain CDS and 3'UTR content
+                        utr_parts.append(fasta[tscript.chrom][utr_start - 1 : exon.end].seq)
                 
-                start_idx = cds_end
-                end_idx = tscript.end + dstream_nts
+                if not utr_parts:
+                    skipped_count += 1
+                    continue
+
+                full_utr = ''.join(utr_parts)
+                
+                downstream_end = tscript.end + dstream_nts
+                downstream_seq = fasta[tscript.chrom][tscript.end : downstream_end].seq
+
+                term_seq = full_utr + downstream_seq
+            
             elif tscript.strand == "-":
                 cds_start = cds_features[0].start
 
-                if cds_start - tscript.start <= 0:
-                    skipped += 1
+                # Get all exons before the CDS start
+                for exon in exon_features:
+                    if exon.start < cds_start:
+                        utr_end = min(exon.end, cds_start - 1)
+                        utr_parts.append(fasta[tscript.chrom][exon.start - 1 : utr_end].seq)
+                
+                if not utr_parts:
+                    skipped_count += 1
                     continue
+                
+                full_utr = ''.join(utr_parts)
 
-                start_idx = max(0, (tscript.start - dstream_nts) - 1)
-                end_idx = cds_start - 1
+                downstream_start = max(0, tscript.start - dstream_nts - 1)
+                downstream_seq = fasta[tscript.chrom][downstream_start : tscript.start - 1].seq
+
+                full_seq = downstream_seq + full_utr
+                term_seq = pyfaidx.Sequence(seq=full_seq).reverse.complement.seq
+                
             else:
                 print(f"WARNING: unknown strand '{tscript.strand}' for feature '{tscript.id}' in '{genome_name}'", file=sys.stderr)
+                skipped_count += 1
                 continue
-
-            term_seq = fasta[tscript.chrom][start_idx : end_idx]
-            if tscript.strand == "-":
-                term_seq = term_seq.reverse.complement
-            term_seq = term_seq.seq
 
             if term_seq:
                 display_id = tscript.id
@@ -140,7 +168,7 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, dstrea
                 wrapped_seq = textwrap.fill(term_seq, width=80)
                 output_records.append(f"{header}\n{wrapped_seq}\n")
             else:
-                skipped += 1
+                skipped_count += 1
                 continue
 
         except Exception as e:
@@ -150,7 +178,7 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, dstrea
     with open(out_fpath, 'w') as out_f:
         out_f.writelines(output_records)
     
-    print(f"Extracted {len(output_records)} terminator sequences from '{genome_name}'\nskipped {skipped} transcripts")
+    print(f"Extracted {len(output_records)} terminator sequences from '{genome_name}'\nskipped {skipped_count} transcripts")
 
 
 def find_files(dir: str) -> list[tuple[str, str]]:
