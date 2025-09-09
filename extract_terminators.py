@@ -11,6 +11,7 @@ import textwrap
 from collections import defaultdict
 
 # External libraries
+# jellyfish: https://anaconda.org/bioconda/jellyfish
 import pyfaidx  # https://anaconda.org/bioconda/pyfaidx
 import gffutils # https://anaconda.org/bioconda/gffutils
 
@@ -97,7 +98,7 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, dstrea
     output_records = []
     skipped_count = 0
 
-    # All coordinates are 1-based, and modified as necessary in slice operations
+    # All coordinates 1-based until modified in slice operations
     for tscript in db.features_of_type("mRNA", order_by="start"):
         try:
             cds_features = list(db.children(tscript, featuretype="CDS", order_by="start"))
@@ -128,8 +129,12 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, dstrea
 
                 full_utr = ''.join(utr_parts)
                 
+                downstream_start = tscript.end + 1
                 downstream_end = tscript.end + dstream_nts
-                downstream_seq = fasta[tscript.chrom][tscript.end : downstream_end].seq
+
+                downstream_seq = ""
+                if downstream_start <= downstream_end:
+                    downstream_seq = fasta[tscript.chrom][downstream_start - 1 : downstream_end].seq
 
                 term_seq = full_utr + downstream_seq
             
@@ -148,8 +153,12 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, dstrea
                 
                 full_utr = ''.join(utr_parts)
 
-                downstream_start = max(0, tscript.start - dstream_nts - 1)
-                downstream_seq = fasta[tscript.chrom][downstream_start : tscript.start - 1].seq
+                downstream_start = max(1, tscript.start - dstream_nts)
+                downstream_end = tscript.start - 1
+
+                downstream_seq = ""
+                if downstream_start <= downstream_end:
+                    downstream_seq = fasta[tscript.chrom][downstream_start - 1 : downstream_end].seq
 
                 full_seq = downstream_seq + full_utr
                 term_seq = pyfaidx.Sequence(seq=full_seq).reverse.complement.seq
@@ -165,7 +174,7 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, dstrea
                     raw_id = tscript.attributes["orig_protein_id"][0]
                     display_id = raw_id.split('|')[-1]
                 header = f">{display_id} | {tscript.chrom}:{tscript.start}-{tscript.end}({tscript.strand})"
-                wrapped_seq = textwrap.fill(term_seq, width=80)
+                wrapped_seq = textwrap.fill(term_seq.upper(), width=80)
                 output_records.append(f"{header}\n{wrapped_seq}\n")
             else:
                 skipped_count += 1
@@ -222,7 +231,7 @@ def find_files(dir: str) -> list[tuple[str, str]]:
 
 def worker(args):
     """
-    Processes a single genome by extracting its terminator sequences.
+    Extracts the terminator sequences of a single genome.
     Args:
         args (tuple): A tuple containing (fasta_fpath, gff_fpath, dstream_nts).
     """

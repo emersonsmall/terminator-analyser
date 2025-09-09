@@ -6,7 +6,7 @@ import glob
 import textwrap
 import pyfaidx
 
-# TODO: add arg for minimum 3'UTR length??
+# TODO: add arg for minimum 3'UTR length?
 
 NUE_START = -35 # -1 is the last nt of the 3'UTR
 NUE_END = -5
@@ -43,7 +43,7 @@ def get_top_kmers(input_fasta: str, k_size: int, top_n: int) -> list:
         "-s", "100M",
         "-t", str(cpu_cores),
         "-o", jf_db_path,
-        "--canonical",
+        #"--canonical",
         input_fasta
     ]
     run_command(count_cmd)
@@ -91,7 +91,9 @@ def generate_tiling_kmers(sequences: list[str], kmer_size: int) -> list[str]:
     for seq in sequences:
         for i in range(0, len(seq) - kmer_size + 1, kmer_size):
             kmer = seq[i : i + kmer_size]
-            kmer_records.append(f">kmer_{kmer_id_counter}\n{kmer}\n")
+            rna_kmer = kmer.replace('T', 'U')
+
+            kmer_records.append(f">kmer_{kmer_id_counter}\n{rna_kmer}\n")
             kmer_id_counter += 1
     return kmer_records
 
@@ -175,8 +177,8 @@ def main():
     print_report("CE", top_ce_kmers, args.kmer_size)
     print_report("NUE", top_nue_kmers, args.kmer_size)
 
-    os.remove(ce_fasta_path)
-    os.remove(nue_fasta_path)
+    # os.remove(ce_fasta_path)
+    # os.remove(nue_fasta_path)
 
     print("FINISHED")
 

@@ -6,8 +6,9 @@ import pyfaidx
 import os
 from collections import defaultdict
 from textwrap import fill
+import re
 
-def parse_fasta(fasta_fpath) -> dict[str, str]:
+def parse_fasta(fasta_fpath, is_query) -> dict[str, str]:
     """
     Parses a FASTA file and returns a dictionary mapping IDs to sequences.
     - Key: Record ID (e.g., 'AT5G56260.2')
@@ -15,11 +16,20 @@ def parse_fasta(fasta_fpath) -> dict[str, str]:
     """
     data = {}
     try:
-        fasta_records = pyfaidx.Fasta(fasta_fpath, as_raw=True)
+        fasta_records = pyfaidx.Fasta(fasta_fpath, as_raw=True, read_long_names=True)
         for record in fasta_records:
             record_id = record.name.split()[0]
             seq = str(record).upper()
-            data[record_id] = seq
+            header = record.name
+            strand = "n/a"
+
+            if is_query:
+                match = re.search(r'\(([+-?])\)$', header)
+                if match:
+                    strand = match.group(1)
+                
+            data[record_id] = (seq, strand)
+
     except pyfaidx.FastaIndexingError as e:
         print(f"ERROR: could not parse FASTA file '{fasta_fpath}': {e}", file=sys.stderr)
         sys.exit(1)
@@ -39,11 +49,11 @@ def main():
     assert os.path.isfile(args.query_fasta), f"Query FASTA file '{args.query_fasta}' does not exist."
 
     print(f"Parsing reference FASTA")
-    reference_records = parse_fasta(args.reference_fasta)
+    reference_records = parse_fasta(args.reference_fasta, False)
     print(f"Found {len(reference_records)} records in reference FASTA")
 
     print(f"Parsing query FASTA")
-    query_records = parse_fasta(args.query_fasta)
+    query_records = parse_fasta(args.query_fasta, True)
     print(f"Found {len(query_records)} records in query FASTA")
 
     reference_ids = set(reference_records.keys())
@@ -57,12 +67,12 @@ def main():
     mismatches = defaultdict(tuple)
 
     for record_id in common_ids:
-        ref = reference_records[record_id]
-        query = query_records[record_id]
+        ref, _ = reference_records[record_id]
+        query, query_strand = query_records[record_id]
         if ref == query:
             matches += 1
         else:
-            mismatches[record_id] = (fill(ref, width=80), fill(query, width=80))
+            mismatches[record_id] = (fill(ref, width=80), fill(query, width=80), query_strand)
     
     num_mismatches = len(mismatches)
     num_missing_from_q = len(missing_from_query)
@@ -82,6 +92,7 @@ def main():
             print(f" RECORD {record_id}")
             print(f"   Reference: \n{mismatches[record_id][0]}")
             print(f"   Query    : \n{mismatches[record_id][1]}")
+            print(f"Query Strand: \n{mismatches[record_id][2]}")
             print("-" * 30)
         if num_mismatches > 20:
             print(f" ... and {num_mismatches - 20} more mismatches.")
