@@ -6,11 +6,10 @@ import glob
 import textwrap
 import pyfaidx
 
-# TODO: add arg for minimum 3'UTR length?
-
 NUE_START = -35 # -1 is the last nt of the 3'UTR
 NUE_END = -5
-CE_WIDTH = 30
+CE_START = -15
+CE_END = 15
 
 def run_command(command: list[str]):
     print("Running command:", " ".join(command))
@@ -43,7 +42,6 @@ def get_top_kmers(input_fasta: str, k_size: int, top_n: int) -> list:
         "-s", "100M",
         "-t", str(cpu_cores),
         "-o", jf_db_path,
-        #"--canonical",
         input_fasta
     ]
     run_command(count_cmd)
@@ -91,9 +89,7 @@ def generate_tiling_kmers(sequences: list[str], kmer_size: int) -> list[str]:
     for seq in sequences:
         for i in range(0, len(seq) - kmer_size + 1, kmer_size):
             kmer = seq[i : i + kmer_size]
-            rna_kmer = kmer.replace('T', 'U')
-
-            kmer_records.append(f">kmer_{kmer_id_counter}\n{rna_kmer}\n")
+            kmer_records.append(f">kmer_{kmer_id_counter}\n{kmer}\n")
             kmer_id_counter += 1
     return kmer_records
 
@@ -107,16 +103,20 @@ def main():
     )
     parser.add_argument("input_dir", help="Path of the directory containing FASTA files.")
     parser.add_argument(
-        "--downstream-nts", type=int, default=50,
+        "-d", "--downstream-nts", type=int, default=50,
         help="Number of downstream nucleotides included in the terminators (default: 50)."
     )
     parser.add_argument(
-        "-N", "--top-n", type=int, default=50,
+        "-n", "--top-n", type=int, default=50,
         help="The number of most common k-mers to report (default: 50)."
     )
     parser.add_argument(
         "-k", "--kmer-size", type=int, default=6,
         help="The size of the k-mers to analyze (default: 6)."
+    )
+    parser.add_argument(
+        "-m", "--min-3utr-length", type=int, default=50,
+        help="Minimum length of the 3'UTR required to be included in the analysis (default: 50)."
     )
     args = parser.parse_args()
 
@@ -128,8 +128,8 @@ def main():
     print(f"Found {len(fasta_files)} FASTA files")
     
     # Extract all CE and NUE regions into separate temp files
-    ce_fasta_path = "all_CEs.fa"
-    nue_fasta_path = "all_NUEs.fa"
+    ce_fasta_path = "tiled_CEs.fa"
+    nue_fasta_path = "tiled_NUEs.fa"
     print(f"Extracting CE and NUE regions")
 
     ce_seqs = []
@@ -146,21 +146,25 @@ def main():
             total_len = len(seq)
             utr_len = total_len - args.downstream_nts
 
-            # Slice NUE window
-            if utr_len >= abs(NUE_START):
+            if utr_len < args.min_3utr_length:
+                skipped += 1
+                continue
+
+            if utr_len >= abs(NUE_START) and args.downstream_nts >= CE_END:
+                # Slice NUE window
                 nue_start = utr_len - abs(NUE_START)
                 nue_end = utr_len - abs(NUE_END)
                 nue_seq = seq[nue_start - 1 : nue_end]
                 nue_seqs.append(nue_seq)
+
+                # Slice CE window
+                ce_start = utr_len - abs(CE_START)
+                ce_end = utr_len + CE_END
+                ce_seq = seq[ce_start - 1 : ce_end]
+                ce_seqs.append(ce_seq)
             else:
                 skipped += 1
                 continue
-
-            # Slice CE window
-            ce_start = utr_len - CE_WIDTH // 2
-            ce_end = utr_len + CE_WIDTH // 2
-            ce_seq = seq[ce_start - 1 : ce_end]
-            ce_seqs.append(ce_seq)
 
     ce_records = generate_tiling_kmers(ce_seqs, args.kmer_size)
     nue_records = generate_tiling_kmers(nue_seqs, args.kmer_size)
@@ -177,8 +181,8 @@ def main():
     print_report("CE", top_ce_kmers, args.kmer_size)
     print_report("NUE", top_nue_kmers, args.kmer_size)
 
-    # os.remove(ce_fasta_path)
-    # os.remove(nue_fasta_path)
+    os.remove(ce_fasta_path)
+    os.remove(nue_fasta_path)
 
     print("FINISHED")
 
