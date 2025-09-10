@@ -1,97 +1,91 @@
 import sys
 import os
 import argparse
-import subprocess
 import glob
 import textwrap
+from collections import defaultdict
+import heapq
+import statistics
+
 import pyfaidx
 
-NUE_START = -35 # -1 is the last nt of the 3'UTR
+# -1 is the last nt of the 3'UTR
+NUE_START = -35
 NUE_END = -5
 CE_START = -15
 CE_END = 15
 
-def run_command(command: list[str]):
-    print("Running command:", " ".join(command))
-    try:
-        process = subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True
-        )
-        return process
-    except FileNotFoundError:
-        print(f"ERROR: Command not found: {command[0]}", file=sys.stderr)
-        sys.exit(1)
-    except subprocess.CalledProcessError as e:
-        print(f"ERROR: Command '{' '.join(command)}' failed with exit code {e.returncode}", file=sys.stderr)
-        sys.exit(e.returncode)
-
-
-def get_top_kmers(input_fasta: str, k_size: int, top_n: int) -> list:
-    """Runs the jellyfish k-mer counting tool and returns the top N kmers."""
-    jf_db_path = f"{input_fasta}.jf"
-    dump_path = f"{input_fasta}.tsv"
-
-    cpu_cores = os.cpu_count() or 1
-
-    count_cmd = [
-        "jellyfish", "count",
-        "-m", str(k_size),
-        "-s", "100M",
-        "-t", str(cpu_cores),
-        "-o", jf_db_path,
-        input_fasta
-    ]
-    run_command(count_cmd)
-
-    dump_cmd = [
-        "jellyfish", "dump",
-        "-c", jf_db_path,
-        "-o", dump_path
-    ]
-    run_command(dump_cmd)
-
-    # Parse and sort
-    kmer_counts = []
-    with open(dump_path, "r") as f:
-        for line in f:
-            kmer, count = line.strip().split()
-            kmer_counts.append((kmer, int(count)))
-    kmer_counts.sort(key=lambda x: x[1], reverse=True)
-
-    # Cleanup
-    os.remove(jf_db_path)
-    os.remove(dump_path)
-
-    return kmer_counts[:top_n]
-
-
-def print_report(region_name: str, kmer_counts: list, k_size: int):
-    print("\n" + "=" * 40)
-    print(f"Top {len(kmer_counts)} K-mers for {region_name}")
-    print("=" * 40)
-    print(f"{'Rank':<5} | {'K-mer':<{k_size + 2}} | {'Count':>10}")
-    print("-" * 40)
-    for i, (kmer, count) in enumerate(kmer_counts):
-        rank = i + 1
-        print(f"{rank:<5} | {kmer:<{k_size + 2}} | {count:>10,}")
-
-
-def generate_tiling_kmers(sequences: list[str], kmer_size: int) -> list[str]:
+def get_kmer_counts(sequences: list[str], region_start: int, kmer_size: int, step_size: int = 1) -> dict:
     """
-    Generates k-mers from a list of sequences using a non-overlapping tiling approach.
-    Returns a list of formatted FASTA records.
+    Counts k-mers at each position in the specified region across all sequences.
+    - step_size = 1: overlapping k-mers
+    - step_size = kmer_size: non-overlapping k-mers
     """
-    kmer_records = []
-    kmer_id_counter = 0
+    positional_counts = defaultdict(lambda: defaultdict(int))
+
     for seq in sequences:
-        for i in range(0, len(seq) - kmer_size + 1, kmer_size):
+        for i in range(0, len(seq) - kmer_size + 1, step_size):
             kmer = seq[i : i + kmer_size]
-            kmer_records.append(f">kmer_{kmer_id_counter}\n{kmer}\n")
-            kmer_id_counter += 1
-    return kmer_records
+
+            pos = region_start + i + kmer_size - 1 # Counts anchored to rightmost nt of kmer
+
+            positional_counts[kmer][pos] += 1
+
+    return positional_counts
+
+
+def rank_kmers_by_delta(kmer_counts: dict, top_n: int) -> list:
+    """
+    Ranks k-mers by the difference between their peak and median positional counts.
+    Returns the top N k-mers with the highest delta.
+    """
+    heap = []
+    for kmer, positions in kmer_counts.items():
+        if not positions:
+            continue
+
+        counts = list(positions.values())
+
+        peak_count = 0
+        peak_pos = 0
+        for pos, count in positions.items():
+            if count > peak_count:
+                peak_count = count
+                peak_pos = pos
+        
+        median_count = statistics.median(counts)
+        delta = peak_count - median_count
+
+        item = (delta, peak_count, kmer, {
+            "kmer": kmer,
+            "delta": delta,
+            "peak_count": peak_count,
+            "peak_pos": peak_pos,
+            "median_count": median_count
+        })
+
+        if len(heap) < top_n:
+            heapq.heappush(heap, item)
+        else:
+            heapq.heappushpop(heap, item)
+    
+    top_items = sorted([item[3] for item in heap], 
+                       key=lambda x: (x["delta"], x["peak_count"]), 
+                       reverse=True)
+
+    return top_items
+
+
+def print_report(region_name: str, kmers: list, kmer_size: int):
+    print("\n" + "=" * 40)
+    print(f"Top {len(kmers)} K-mers for {region_name}")
+    print("=" * 40)
+    print(f"{'Rank':<5} | {'K-mer':<{kmer_size + 2}} | {'Delta':>15} | {'Peak Count':>12} | {'Peak Pos':>15}")
+    print("-" * 40)
+
+    for i, item in enumerate(kmers):
+        rank = i + 1
+        print(f"{rank:<5} | {item['kmer']:<{kmer_size + 2}} | {item['delta']:>15.1f} | {item['peak_count']:>12,} | {item['peak_pos']:>15}")
 
 
 def main():
@@ -118,6 +112,10 @@ def main():
         "-m", "--min-3utr-length", type=int, default=50,
         help="Minimum length of the 3'UTR required to be included in the analysis (default: 50)."
     )
+    parser.add_argument(
+        "-s", "--step-size", type=int, default=1,
+        help="Step size for k-mer counting: 1=overlapping (default), kmer_size for non-overlapping."
+    )
     args = parser.parse_args()
 
     # Find all fasta files
@@ -127,11 +125,7 @@ def main():
         sys.exit(1)
     print(f"Found {len(fasta_files)} FASTA files")
     
-    # Extract all CE and NUE regions into separate temp files
-    ce_fasta_path = "tiled_CEs.fa"
-    nue_fasta_path = "tiled_NUEs.fa"
     print(f"Extracting CE and NUE regions")
-
     ce_seqs = []
     nue_seqs = []
     skipped = 0
@@ -166,25 +160,18 @@ def main():
                 skipped += 1
                 continue
 
-    ce_records = generate_tiling_kmers(ce_seqs, args.kmer_size)
-    nue_records = generate_tiling_kmers(nue_seqs, args.kmer_size)
+    nue_pos_counts = get_kmer_counts(nue_seqs, NUE_START, args.kmer_size, args.step_size)
+    ranked_nue_kmers = rank_kmers_by_delta(nue_pos_counts, args.top_n)
 
-    with open(ce_fasta_path, "w") as f:
-        f.writelines(ce_records)
-    with open(nue_fasta_path, "w") as f:
-        f.writelines(nue_records)
-
-    top_ce_kmers = get_top_kmers(ce_fasta_path, args.kmer_size, args.top_n)
-    top_nue_kmers = get_top_kmers(nue_fasta_path, args.kmer_size, args.top_n)
+    ce_pos_counts = get_kmer_counts(ce_seqs, CE_START, args.kmer_size, args.step_size)
+    ranked_ce_kmers = rank_kmers_by_delta(ce_pos_counts, args.top_n)
 
     print(f"\n{skipped} of {num_terminators} ({(skipped/num_terminators * 100):.2f}%) terminator sequences skipped due to insufficient 3'UTR length")
-    print_report("CE", top_ce_kmers, args.kmer_size)
-    print_report("NUE", top_nue_kmers, args.kmer_size)
-
-    os.remove(ce_fasta_path)
-    os.remove(nue_fasta_path)
+    print_report("CE", ranked_ce_kmers, args.kmer_size)
+    print_report("NUE", ranked_nue_kmers, args.kmer_size)
 
     print("FINISHED")
+
 
 if __name__ == "__main__":
     main()

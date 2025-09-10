@@ -52,6 +52,11 @@ def get_args() -> argparse.Namespace:
         action="store_true",
         help="Buffer terminator sequences so that they are all equal length."
     )
+    parser.add_argument(
+        "--no-complement",
+        action="store_true",
+        help="Do not take the reverse complement of sequences on the negative strand."
+    )
 
     args = parser.parse_args()
 
@@ -61,7 +66,7 @@ def get_args() -> argparse.Namespace:
     return args
 
 
-def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, dstream_nts: int) -> None:
+def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, dstream_nts: int, no_complement: bool) -> None:
     """
     Extracts terminator sequences (3'UTR + downstream region) from the given fasta and gff files.
 
@@ -160,8 +165,9 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, dstrea
                 if downstream_start <= downstream_end:
                     downstream_seq = fasta[tscript.chrom][downstream_start - 1 : downstream_end].seq
 
-                full_seq = downstream_seq + full_utr
-                term_seq = pyfaidx.Sequence(seq=full_seq).reverse.complement.seq
+                term_seq = downstream_seq + full_utr
+                if not no_complement:
+                    term_seq = pyfaidx.Sequence(seq=term_seq).reverse.complement.seq
                 
             else:
                 print(f"WARNING: unknown strand '{tscript.strand}' for feature '{tscript.id}' in '{genome_name}'", file=sys.stderr)
@@ -235,14 +241,14 @@ def worker(args):
     Args:
         args (tuple): A tuple containing (fasta_fpath, gff_fpath, dstream_nts).
     """
-    fasta_fpath, gff_fpath, dstream_nts = args
+    fasta_fpath, gff_fpath, dstream_nts, no_complement = args
     genome_name = os.path.basename(fasta_fpath).split('.')[0]
 
     print(f"Processing genome '{genome_name}'")
     os.makedirs(TERMINATORS_DIR, exist_ok=True)
     terminators_fpath = os.path.join(TERMINATORS_DIR, f"{genome_name}_terminators.fa")
 
-    extract_terminators(fasta_fpath, gff_fpath, terminators_fpath, dstream_nts)
+    extract_terminators(fasta_fpath, gff_fpath, terminators_fpath, dstream_nts, no_complement)
 
 
 def main() -> int:
@@ -251,7 +257,7 @@ def main() -> int:
 
         file_pairs = find_files(args.input_dir)
 
-        tasks = [(pair[0], pair[1], args.downstream_nts) for pair in file_pairs]
+        tasks = [(pair[0], pair[1], args.downstream_nts, args.no_complement) for pair in file_pairs]
 
         # process each genome in parallel
         with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
