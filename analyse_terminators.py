@@ -10,10 +10,10 @@ import statistics
 import pyfaidx
 
 # -1 is the last nt of the 3'UTR
-NUE_START = -35
-NUE_END = -5
+NUE_START = -50
+NUE_END = -1
 CE_START = -15
-CE_END = 15
+CE_END = 20
 
 def get_kmer_counts(sequences: list[str], region_start: int, kmer_size: int, step_size: int = 1) -> dict:
     """

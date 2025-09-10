@@ -53,9 +53,27 @@ def get_args() -> argparse.Namespace:
         help="Buffer terminator sequences so that they are all equal length."
     )
     parser.add_argument(
-        "--no-complement",
+        "--complement",
         action="store_true",
-        help="Do not take the reverse complement of sequences on the negative strand."
+        help="Take the complement of sequences on the negative strand (required to validate sequences against reference)."
+    )
+    parser.add_argument(
+        "--filter-consecutive-a",
+        type=int,
+        default=6,
+        help="Filter out terminators with this many consecutive 'A's in the first <filter-window-size> downstream nts (default: 6). Set to 0 to disable."
+    )
+    parser.add_argument(
+        "--filter-window-a",
+        type=int,
+        default=8,
+        help="Filter out terminators with this many 'A's in the first <filter-window-size> downstream nts (default: 8). Set to 0 to disable."
+    )
+    parser.add_argument(
+        "--filter-window-size",
+        type=int,
+        default=10,
+        help="Number of downstream nts to check for internal priming artifacts (default: 10)."
     )
 
     args = parser.parse_args()
@@ -66,7 +84,35 @@ def get_args() -> argparse.Namespace:
     return args
 
 
-def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, dstream_nts: int, no_complement: bool) -> None:
+def is_internal_priming_artifact(downstream_seq: str, filter_consecutive_a: int, filter_window_a: int, window_size: int = 10) -> bool:
+    """
+    Checks if the given downstream sequence is likely to be an internal priming artifact.
+    Args:
+        downstream_seq (str): The downstream sequence to check.
+        filter_consecutive_a (int): The minimum number of consecutive 'A's to consider it an artifact (default: 6).
+        filter_window_a (int): The minimum number of 'A's in the window to consider it an artifact (default: 8).
+        window (int): The size of the window (default: 10).
+    """
+    assert window_size > 0, "Window size must be greater than 0."
+    assert len(downstream_seq) >= window_size, "Downstream sequence length must be greater than or equal to window size."
+
+    if filter_consecutive_a == 0 and filter_window_a == 0:
+        return False
+    
+    region_to_check = downstream_seq[:window_size].upper()
+
+    # check for consecutive A's
+    if filter_consecutive_a > 0 and 'A' * filter_consecutive_a in region_to_check:
+        return True
+    
+    # check for total A's in window
+    if filter_window_a > 0 and region_to_check.count('A') >= filter_window_a:
+        return True
+    
+    return False
+
+
+def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, args: argparse.Namespace) -> None:
     """
     Extracts terminator sequences (3'UTR + downstream region) from the given fasta and gff files.
 
@@ -135,11 +181,15 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, dstrea
                 full_utr = ''.join(utr_parts)
                 
                 downstream_start = tscript.end + 1
-                downstream_end = tscript.end + dstream_nts
+                downstream_end = tscript.end + args.downstream_nts
 
                 downstream_seq = ""
                 if downstream_start <= downstream_end:
                     downstream_seq = fasta[tscript.chrom][downstream_start - 1 : downstream_end].seq
+
+                if is_internal_priming_artifact(downstream_seq, args.filter_consecutive_a, args.filter_window_a, args.filter_window_size):
+                    skipped_count += 1
+                    continue
 
                 term_seq = full_utr + downstream_seq
             
@@ -158,16 +208,22 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, dstrea
                 
                 full_utr = ''.join(utr_parts)
 
-                downstream_start = max(1, tscript.start - dstream_nts)
+                downstream_start = max(1, tscript.start - args.downstream_nts)
                 downstream_end = tscript.start - 1
 
                 downstream_seq = ""
                 if downstream_start <= downstream_end:
                     downstream_seq = fasta[tscript.chrom][downstream_start - 1 : downstream_end].seq
 
+                if is_internal_priming_artifact(downstream_seq, args.filter_consecutive_a, args.filter_window_a, args.filter_window_size):
+                    skipped_count += 1
+                    continue
+
                 term_seq = downstream_seq + full_utr
-                if not no_complement:
-                    term_seq = pyfaidx.Sequence(seq=term_seq).reverse.complement.seq
+                # TODO: double check this logic
+                #term_seq = term_seq[::-1]  # reverse to get correct 5' to 3' orientation
+                if args.complement:
+                    term_seq = pyfaidx.Sequence(seq=term_seq).complement.seq
                 
             else:
                 print(f"WARNING: unknown strand '{tscript.strand}' for feature '{tscript.id}' in '{genome_name}'", file=sys.stderr)
@@ -241,14 +297,14 @@ def worker(args):
     Args:
         args (tuple): A tuple containing (fasta_fpath, gff_fpath, dstream_nts).
     """
-    fasta_fpath, gff_fpath, dstream_nts, no_complement = args
+    fasta_fpath, gff_fpath, cli_args = args
     genome_name = os.path.basename(fasta_fpath).split('.')[0]
 
     print(f"Processing genome '{genome_name}'")
     os.makedirs(TERMINATORS_DIR, exist_ok=True)
     terminators_fpath = os.path.join(TERMINATORS_DIR, f"{genome_name}_terminators.fa")
 
-    extract_terminators(fasta_fpath, gff_fpath, terminators_fpath, dstream_nts, no_complement)
+    extract_terminators(fasta_fpath, gff_fpath, terminators_fpath, cli_args)
 
 
 def main() -> int:
@@ -257,7 +313,7 @@ def main() -> int:
 
         file_pairs = find_files(args.input_dir)
 
-        tasks = [(pair[0], pair[1], args.downstream_nts, args.no_complement) for pair in file_pairs]
+        tasks = [(file_pair[0], file_pair[1], args) for file_pair in file_pairs]
 
         # process each genome in parallel
         with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:

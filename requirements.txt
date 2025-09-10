@@ -1,3 +1,2 @@
 gffutils
 pyfaidx
-jellyfish
