@@ -221,7 +221,7 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, args: 
 
                 term_seq = downstream_seq + full_utr
                 # TODO: double check this logic
-                #term_seq = term_seq[::-1]  # reverse to get correct 5' to 3' orientation
+                #term_seq = term_seq[::-1]  # reverse to get 5' to 3' orientation
                 if args.complement:
                     term_seq = pyfaidx.Sequence(seq=term_seq).complement.seq
                 
