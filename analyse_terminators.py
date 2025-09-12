@@ -8,9 +8,6 @@ import statistics
 
 import pyfaidx
 
-# Loke calculates median only within subregion
-# I calculate median across entire terminator to reduce ranking of simple patterns (AAAAAA)
-
 # -1 is the last nt of the 3'UTR
 NUE_START = -35
 NUE_END = -10
@@ -20,7 +17,7 @@ CE_END = 15
 def get_kmer_counts(sequences: list[str], region_start: int, region_end: int, kmer_size: int, downstream_nts: int, step_size: int = 1) -> dict:
     """
     Counts k-mers at each position in the specified region across all sequences.
-    If region_start and region_end are 0, counts k-mers across the entire sequence.
+    If region_start and region_end are 0, counts k-mers across the whole sequence.
     Args:
         sequences (list[str]): List of sequences to analyze.
         region_start (int): Start position of the region (where last nt of 3'UTR = -1, e.g., -50).
@@ -48,17 +45,17 @@ def get_kmer_counts(sequences: list[str], region_start: int, region_end: int, km
     return positional_counts
 
 
-def rank_kmers_by_delta(regional_counts: dict, global_counts: dict, top_n: int) -> list:
+def rank_kmers_by_delta(kmer_counts: dict, top_n: int) -> list:
     """
-    Ranks k-mers by the difference between their regional peak and global (whole terminator) median counts.
+    Ranks k-mers by the difference between their peak and median counts.
     Returns the top N k-mers with the highest delta.
     """
     heap = []
-    for kmer, positions in regional_counts.items():
+    for kmer, positions in kmer_counts.items():
         if not positions:
             continue
 
-        # Find peak count within regional_counts (i.e., within NUE or CE)
+        # Find peak count for this kmer
         peak_count = 0
         peak_pos = 0
         for pos, count in positions.items():
@@ -66,12 +63,10 @@ def rank_kmers_by_delta(regional_counts: dict, global_counts: dict, top_n: int) 
                 peak_count = count
                 peak_pos = pos
         
-        # Calculate median count across entire terminator
-        median_count = 0
-        if kmer in global_counts:
-            g_counts = list(global_counts[kmer].values())
-            median_count = statistics.median(g_counts)
-        
+        # Calculate median count for this kmer
+        counts = list(positions.values())
+        median_count = statistics.median(counts)
+
         delta = peak_count - median_count
 
         item = (delta, peak_count, kmer, {
@@ -163,13 +158,11 @@ def main():
             
             terminators.append(seq)
     
-    global_counts = get_kmer_counts(terminators, 0, 0, args.kmer_size, args.downstream_nts, args.step_size)
-
     nue_counts = get_kmer_counts(terminators, NUE_START, NUE_END, args.kmer_size, args.downstream_nts, args.step_size)
-    ranked_nue_kmers = rank_kmers_by_delta(nue_counts, global_counts, args.top_n)
+    ranked_nue_kmers = rank_kmers_by_delta(nue_counts, args.top_n)
 
     ce_counts = get_kmer_counts(terminators, CE_START, CE_END, args.kmer_size, args.downstream_nts, args.step_size)
-    ranked_ce_kmers = rank_kmers_by_delta(ce_counts, global_counts, args.top_n)
+    ranked_ce_kmers = rank_kmers_by_delta(ce_counts, args.top_n)
 
     print(f"\n{skipped} of {num_terminators} ({(skipped/num_terminators * 100):.2f}%) terminator sequences skipped due to insufficient 3'UTR length")
     print_report("CE", ranked_ce_kmers, args.kmer_size)
