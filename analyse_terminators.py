@@ -8,11 +8,11 @@ import statistics
 
 import pyfaidx
 
-# -1 is the last nt of the 3'UTR
+# -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 NUE_START = -35
 NUE_END = -10
-CE_START = -10
-CE_END = 15
+CE_START = -5
+CE_END = 5
 
 def get_kmer_counts(sequences: list[str], region_start: int, region_end: int, kmer_size: int, downstream_nts: int, step_size: int = 1) -> dict:
     """
@@ -102,7 +102,7 @@ def print_report(region_name: str, kmers: list, kmer_size: int):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Analyses the NUE and CE regions of the given set of terminator sequences."
+        description="Analyses the NUE and CE regions of the given terminator sequences."
     )
     parser.add_argument("input_dir", help="Path to the directory containing terminator sequence FASTA files.")
     parser.add_argument(

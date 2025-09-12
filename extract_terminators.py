@@ -53,11 +53,6 @@ def get_args() -> argparse.Namespace:
         help="Buffer terminator sequences so that they are all equal length."
     )
     parser.add_argument(
-        "--complement",
-        action="store_true",
-        help="Take the complement of sequences on the negative strand (required to validate sequences against reference)."
-    )
-    parser.add_argument(
         "--filter-consecutive-a",
         type=int,
         default=6,
@@ -84,14 +79,15 @@ def get_args() -> argparse.Namespace:
     return args
 
 
-def is_internal_priming_artifact(downstream_seq: str, filter_consecutive_a: int, filter_window_a: int, window_size: int = 10) -> bool:
+def is_internal_priming_artifact(downstream_seq: str, filter_consecutive_a: int = 6, filter_window_a: int = 8, window_size: int = 10) -> bool:
     """
     Checks if the given downstream sequence is likely to be an internal priming artifact.
+    Methodology based on Beaudong et al. DOI: 10.1101/gr.10.7.1001 
     Args:
         downstream_seq (str): The downstream sequence to check.
         filter_consecutive_a (int): The minimum number of consecutive 'A's to consider it an artifact (default: 6).
         filter_window_a (int): The minimum number of 'A's in the window to consider it an artifact (default: 8).
-        window (int): The size of the window (default: 10).
+        window_size (int): The number of nucleotides to check from the start of the sequence (default: 10).
     """
     assert window_size > 0, "Window size must be greater than 0."
     assert len(downstream_seq) >= window_size, "Downstream sequence length must be greater than or equal to window size."
@@ -219,11 +215,8 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, args: 
                     skipped_count += 1
                     continue
 
-                term_seq = downstream_seq + full_utr
-                # TODO: double check this logic
-                #term_seq = term_seq[::-1]  # reverse to get 5' to 3' orientation
-                if args.complement:
-                    term_seq = pyfaidx.Sequence(seq=term_seq).complement.seq
+                term_seq = downstream_seq + full_utr # 3' to 5', + strand content
+                term_seq = pyfaidx.Sequence(seq=term_seq).reverse.complement.seq # 5' to 3', - strand content
                 
             else:
                 print(f"WARNING: unknown strand '{tscript.strand}' for feature '{tscript.id}' in '{genome_name}'", file=sys.stderr)
