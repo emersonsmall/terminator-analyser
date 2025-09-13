@@ -1,7 +1,7 @@
 # TODO: use ncbi API to retrieve given genomes/genus. still provide option to
 #       specify local files. check if files exist, if not, download them. Can check against filenames that api provides
 
-# TODO: add flag for DB creation, delete DBs on error if not created
+# utr always refers to 3'utr in this script unless otherwise specified
 
 import os
 import sys
@@ -11,7 +11,6 @@ import textwrap
 from collections import defaultdict
 
 # External libraries
-# jellyfish: https://anaconda.org/bioconda/jellyfish
 import pyfaidx  # https://anaconda.org/bioconda/pyfaidx
 import gffutils # https://anaconda.org/bioconda/gffutils
 
@@ -34,9 +33,6 @@ class FileProcessingError(TerminatorExtractionError):
 
 
 def get_args() -> argparse.Namespace:
-    """
-    Parses command line arguments using argparse.
-    """
     parser = argparse.ArgumentParser(
         description="Extract terminators for the given genomes/genus."
     )
@@ -146,6 +142,7 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, args: 
     skipped_count = 0
 
     # All coordinates 1-based until modified in slice operations
+    # Python slices are 0-based, end-exclusive. -1 only for start coords
     for tscript in db.features_of_type("mRNA", order_by="start"):
         try:
             cds_features = list(db.children(tscript, featuretype="CDS", order_by="start"))
@@ -168,60 +165,49 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, args: 
                 for exon in exon_features:
                     if exon.end > cds_end:
                         utr_start = max(exon.start, cds_end + 1) # One exon can contain CDS and 3'UTR content
-                        utr_parts.append(fasta[tscript.chrom][utr_start - 1 : exon.end].seq)
-                
-                if not utr_parts:
-                    skipped_count += 1
-                    continue
+                        utr_end = exon.end
+                        utr_parts.append(fasta[tscript.chrom][utr_start - 1 : utr_end].seq)
 
-                full_utr = ''.join(utr_parts)
-                
                 downstream_start = tscript.end + 1
                 downstream_end = tscript.end + args.downstream_nts
 
-                downstream_seq = ""
-                if downstream_start <= downstream_end:
-                    downstream_seq = fasta[tscript.chrom][downstream_start - 1 : downstream_end].seq
-
-                if is_internal_priming_artifact(downstream_seq, args.filter_consecutive_a, args.filter_window_a, args.filter_window_size):
-                    skipped_count += 1
-                    continue
-
-                term_seq = full_utr + downstream_seq
-            
             elif tscript.strand == "-":
                 cds_start = cds_features[0].start
 
                 # Get all exons before the CDS start
                 for exon in exon_features:
                     if exon.start < cds_start:
+                        utr_start = exon.start
                         utr_end = min(exon.end, cds_start - 1)
-                        utr_parts.append(fasta[tscript.chrom][exon.start - 1 : utr_end].seq)
+                        utr_parts.append(fasta[tscript.chrom][utr_start - 1 : utr_end].seq)
                 
-                if not utr_parts:
-                    skipped_count += 1
-                    continue
-                
-                full_utr = ''.join(utr_parts)
-
                 downstream_start = max(1, tscript.start - args.downstream_nts)
                 downstream_end = tscript.start - 1
 
-                downstream_seq = ""
-                if downstream_start <= downstream_end:
-                    downstream_seq = fasta[tscript.chrom][downstream_start - 1 : downstream_end].seq
-
-                if is_internal_priming_artifact(downstream_seq, args.filter_consecutive_a, args.filter_window_a, args.filter_window_size):
-                    skipped_count += 1
-                    continue
-
-                term_seq = downstream_seq + full_utr # 3' to 5', + strand content
-                term_seq = pyfaidx.Sequence(seq=term_seq).reverse.complement.seq # 5' to 3', - strand content
-                
             else:
                 print(f"WARNING: unknown strand '{tscript.strand}' for feature '{tscript.id}' in '{genome_name}'", file=sys.stderr)
                 skipped_count += 1
                 continue
+            
+            if not utr_parts:
+                skipped_count += 1
+                continue
+
+            full_utr = ''.join(utr_parts)
+
+            downstream_seq = ""
+            if downstream_start <= downstream_end:
+                downstream_seq = fasta[tscript.chrom][downstream_start - 1 : downstream_end].seq
+
+            if is_internal_priming_artifact(downstream_seq, args.filter_consecutive_a, args.filter_window_a, args.filter_window_size):
+                skipped_count += 1
+                continue
+            
+            if tscript.strand == "+":
+                term_seq = full_utr + downstream_seq
+            else:
+                term_seq = downstream_seq + full_utr # 3' to 5', + strand content
+                term_seq = pyfaidx.Sequence(seq=term_seq).reverse.complement.seq # 5' to 3', - strand content
 
             if term_seq:
                 display_id = tscript.id

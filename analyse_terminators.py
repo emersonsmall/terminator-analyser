@@ -6,13 +6,72 @@ from collections import defaultdict
 import heapq
 import statistics
 
+from plot_utils import plot_signal_distribution
+
 import pyfaidx
 
+# Region coordinates for k-mer count window
+# These match Loke paper
 # -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
-NUE_START = -35
-NUE_END = -10
-CE_START = -5
-CE_END = 5
+NUE_START = -50
+NUE_END = -1
+CE_START = -15
+CE_END = 20
+
+
+def get_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Analyses the NUE and CE regions of the given terminator sequences."
+    )
+    parser.add_argument("input_dir", help="Path to the directory containing terminator sequence FASTA files.")
+    parser.add_argument(
+        "-d", 
+        "--downstream-nts", 
+        type=int, 
+        default=50,
+        help="The number of nucleotides downstream of the CS included in the terminators (default: 50)."
+    )
+    parser.add_argument(
+        "-n",
+        "--top-n",
+        type=int,
+        default=20,
+        help="The number of k-mers to report (default: 20)."
+    )
+    parser.add_argument(
+        "-k", 
+        "--kmer-size", 
+        type=int, 
+        default=6,
+        help="The k-mer size (default: 6)."
+    )
+    parser.add_argument(
+        "-m",
+        "--min-3utr-length",
+        type=int,
+        default=100,
+        help="The minimum length of 3'UTRs to be included in the analysis (default: 100)."
+    )
+    parser.add_argument(
+        "-s",
+        "--step-size",
+        type=int,
+        default=1,
+        help="The step size for k-mer counting: 1=overlapping (default), kmer_size=non-overlapping."
+    )
+    args = parser.parse_args()
+
+    if not os.path.isdir(args.input_dir):
+        parser.error(f"Input directory '{args.input_dir}' does not exist or is not a directory.")
+
+    if not args.min_3utr_length >= abs(NUE_START):
+        parser.error(f"Minimum 3'UTR length must be at least {abs(NUE_START)}.")
+
+    if not args.downstream_nts >= CE_END:
+        parser.error(f"Downstream nts must be at least {CE_END}.")
+
+    return args
+
 
 def get_kmer_counts(sequences: list[str], region_start: int, region_end: int, kmer_size: int, downstream_nts: int, step_size: int = 1) -> dict:
     """
@@ -101,36 +160,7 @@ def print_report(region_name: str, kmers: list, kmer_size: int):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Analyses the NUE and CE regions of the given terminator sequences."
-    )
-    parser.add_argument("input_dir", help="Path to the directory containing terminator sequence FASTA files.")
-    parser.add_argument(
-        "-d", "--downstream-nts", type=int, default=50,
-        help="Number of downstream nucleotides included in the terminators (default: 50)."
-    )
-    parser.add_argument(
-        "-n", "--top-n", type=int, default=50,
-        help="The number of most common k-mers to report (default: 50)."
-    )
-    parser.add_argument(
-        "-k", "--kmer-size", type=int, default=6,
-        help="The size of the k-mers to analyze (default: 6)."
-    )
-    parser.add_argument(
-        "-m", "--min-3utr-length", type=int, default=50,
-        help="Minimum length of the 3'UTR required to be included in the analysis (default: 50)."
-    )
-    parser.add_argument(
-        "-s", "--step-size", type=int, default=1,
-        help="Step size for k-mer counting: 1=overlapping (default), kmer_size for non-overlapping."
-    )
-    args = parser.parse_args()
-    # TODO validate args
-    # step_size should be <= kmer_size
-    # min_3utr_length should be >= NUE_START absolute value
-    # input_dir should exist
-    # downstream_nts should be >= CE_END absolute value. or maybe not if want to analyse only 3'UTR
+    args = get_args()
 
     # Find all fasta files
     fasta_files = glob.glob(os.path.join(args.input_dir, "*_terminators.fa"))
@@ -148,7 +178,7 @@ def main():
         for record in fa_records:
             num_terminators += 1
 
-            seq = str(record).upper()
+            seq = str(record).upper().replace('T', 'U')
             total_len = len(seq)
             utr_len = total_len - args.downstream_nts
 
@@ -167,6 +197,20 @@ def main():
     print(f"\n{skipped} of {num_terminators} ({(skipped/num_terminators * 100):.2f}%) terminator sequences skipped due to insufficient 3'UTR length")
     print_report("CE", ranked_ce_kmers, args.kmer_size)
     print_report("NUE", ranked_nue_kmers, args.kmer_size)
+
+    plot_signal_distribution(
+        ranked_nue_kmers, 
+        nue_counts, 
+        "NUE", 
+        "NUE_signals_plot.png"
+    )
+
+    plot_signal_distribution(
+        ranked_ce_kmers, 
+        ce_counts, 
+        "CE", 
+        "CE_signals_plot.png"
+    )
 
     print("\nFINISHED")
 
