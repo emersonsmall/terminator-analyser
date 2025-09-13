@@ -199,6 +199,7 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, args: 
             if downstream_start <= downstream_end:
                 downstream_seq = fasta[tscript.chrom][downstream_start - 1 : downstream_end].seq
 
+            # TODO: do this check after reverse complement for - strand
             if is_internal_priming_artifact(downstream_seq, args.filter_consecutive_a, args.filter_window_a, args.filter_window_size):
                 skipped_count += 1
                 continue
