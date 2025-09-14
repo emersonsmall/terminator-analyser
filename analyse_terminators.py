@@ -11,13 +11,17 @@ from plot_utils import plot_signal_distribution
 import pyfaidx
 
 # Region coordinates for k-mer count window
-# These match Loke paper
 # -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 NUE_START = -50
 NUE_END = -1
-CE_START = -15
+CE_START = -10 # Loke paper uses -15, but -10 gives better results. If using -15, AAUAAA and other NUE signals dominate
 CE_END = 20
 
+# Plot constants
+NUE_X_MIN = -35
+NUE_X_MAX = -5
+CE_X_MIN = -10
+CE_X_MAX = 15
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -201,7 +205,9 @@ def main():
     plot_signal_distribution(
         ranked_nue_kmers, 
         nue_counts, 
-        "NUE", 
+        "NUE",
+        NUE_X_MIN, 
+        NUE_X_MAX,
         "NUE_signals_plot.png"
     )
 
@@ -209,6 +215,8 @@ def main():
         ranked_ce_kmers, 
         ce_counts, 
         "CE", 
+        CE_X_MIN, 
+        CE_X_MAX,
         "CE_signals_plot.png"
     )
 

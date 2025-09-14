@@ -3,13 +3,11 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-NUE_X_MIN = -35
-NUE_X_MAX = -5
-CE_X_MIN = -15
-CE_X_MAX = 15
 CS_POSITION = 1
+LINESTYLES = ['-', '--', '-.', ':']
+MARKERS = ['o', 's', '^', 'D', 'v', 'P', '*', 'X']
 
-def plot_signal_distribution(ranked_kmers: list, counts_data: dict, region: str, out_file: str) -> None:
+def plot_signal_distribution(ranked_kmers: list, counts_data: dict, region: str, x_min: int, x_max: int, out_file: str) -> None:
     """
     Generates and saves a line plot using a list of ranked k-mers and their positional counts.
 
@@ -19,6 +17,7 @@ def plot_signal_distribution(ranked_kmers: list, counts_data: dict, region: str,
         region (str): Name of the region being analyzed.
         out_file (str): Path to save the output plot image.
     """
+    tick_interval = 5
     top_n = len(ranked_kmers)
 
     top_kmers = [item['kmer'] for item in ranked_kmers]
@@ -32,9 +31,18 @@ def plot_signal_distribution(ranked_kmers: list, counts_data: dict, region: str,
     df = df.reindex(sorted(df.index))
 
     # Create plot
-    fig, ax = plt.subplots(figsize=(12, 7))
-    for kmer in df.columns:
-        ax.plot(df.index, df[kmer], marker='o', linestyle='-', markersize=4, label=kmer)
+    fig, ax = plt.subplots(figsize=(12, 8))
+    for i, kmer in enumerate(df.columns):
+        linestyle = LINESTYLES[i % len(LINESTYLES)]
+        marker = MARKERS[i % len(MARKERS)]
+        ax.plot(
+            df.index,
+            df[kmer],
+            label=kmer,
+            linestyle=linestyle,
+            marker=marker,
+            markersize=5
+        )
     
     # Style plot
     ax.set_xlabel('Position relative to CS', fontsize=12)
@@ -49,13 +57,17 @@ def plot_signal_distribution(ranked_kmers: list, counts_data: dict, region: str,
         ncol=5
     )
 
-    if region.upper() == "NUE":
-        ax.set_xlim(NUE_X_MIN, NUE_X_MAX)
-    elif region.upper() == "CE":
-        ax.set_xlim(CE_X_MIN, CE_X_MAX)
-        ax.axvline(CS_POSITION, linestyle='--', color='red')
+    ax.set_xlim(x_min, x_max)
+    if region.upper() == "CE":
+        ticks = list(range(x_min, x_max + 1, 1))
+        ticks.remove(0)
+        ticks.append(1)
+        ticks.sort()
+        ax.set_xticks(ticks)
+    else:
+        ax.set_xticks(range(x_min, x_max + 1, tick_interval))
     
-    plt.tight_layout(rect=[0, 0, 0.9, 1])
+    plt.tight_layout()
 
     # Save plot
     plt.savefig(out_file, dpi=300)

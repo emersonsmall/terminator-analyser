@@ -1,6 +1,8 @@
 # TODO: use ncbi API to retrieve given genomes/genus. still provide option to
 #       specify local files. check if files exist, if not, download them. Can check against filenames that api provides
 
+# TODO: add arg to specify if - strand should be reverse complemented (default: yes)
+
 # utr always refers to 3'utr in this script unless otherwise specified
 
 import os
@@ -199,17 +201,22 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, args: 
             if downstream_start <= downstream_end:
                 downstream_seq = fasta[tscript.chrom][downstream_start - 1 : downstream_end].seq
 
-            # TODO: do this check after reverse complement for - strand
-            if is_internal_priming_artifact(downstream_seq, args.filter_consecutive_a, args.filter_window_a, args.filter_window_size):
+            if tscript.strand == "+":
+                term_seq = full_utr + downstream_seq # 5' to 3'
+            else:
+                term_seq = downstream_seq + full_utr                             # 5' to 3'
+                term_seq = pyfaidx.Sequence(seq=term_seq).reverse.complement.seq # 3' to 5'
+
+            final_downstream_seq = term_seq[-args.downstream_nts:]
+
+            if len(final_downstream_seq) < args.filter_window_size:
+                skipped_count += 1
+                continue
+
+            if is_internal_priming_artifact(final_downstream_seq, args.filter_consecutive_a, args.filter_window_a, args.filter_window_size):
                 skipped_count += 1
                 continue
             
-            if tscript.strand == "+":
-                term_seq = full_utr + downstream_seq
-            else:
-                term_seq = downstream_seq + full_utr # 3' to 5', + strand content
-                term_seq = pyfaidx.Sequence(seq=term_seq).reverse.complement.seq # 5' to 3', - strand content
-
             if term_seq:
                 display_id = tscript.id
                 if "orig_protein_id" in tscript.attributes:
