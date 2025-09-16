@@ -27,7 +27,9 @@ def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Analyses the NUE and CE regions of the given terminator sequences."
     )
-    parser.add_argument("input_dir", help="Path to the directory containing terminator sequence FASTA files.")
+    parser.add_argument(
+        "input_path",
+        help="Path to the terminator sequence FASTA file/s (filepath or directory path).")
     parser.add_argument(
         "-d", 
         "--downstream-nts", 
@@ -65,8 +67,8 @@ def get_args() -> argparse.Namespace:
     )
     args = parser.parse_args()
 
-    if not os.path.isdir(args.input_dir):
-        parser.error(f"Input directory '{args.input_dir}' does not exist or is not a directory.")
+    if not os.path.exists(args.input_path):
+        parser.error(f"Input path '{args.input_path}' does not exist.")
 
     if not args.min_3utr_length >= abs(NUE_START):
         parser.error(f"Minimum 3'UTR length must be at least {abs(NUE_START)}.")
@@ -167,11 +169,16 @@ def main():
     args = get_args()
 
     # Find all fasta files
-    fasta_files = glob.glob(os.path.join(args.input_dir, "*_terminators.fa"))
+    fasta_files = []
+    if os.path.isdir(args.input_path):
+        fasta_files = glob.glob(os.path.join(args.input_path, "*_terminators.fa"))
+        print(f"Found {len(fasta_files)} FASTA files")
+    elif os.path.isfile(args.input_path):
+        fasta_files = [args.input_path]
+    
     if not fasta_files:
-        print(f"ERROR: No '*_terminators.fa' files found in directory '{args.input_dir}'", file=sys.stderr)
-        sys.exit(1)
-    print(f"Found {len(fasta_files)} FASTA files")
+        print(f"ERROR: No valid FASTA file/s found at path '{args.input_path}'", file=sys.stderr)
+        return 1
     
     terminators = []
     skipped = 0
@@ -224,4 +231,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    exit_code = main()
+    sys.exit(exit_code)

@@ -1,8 +1,6 @@
 # TODO: use ncbi API to retrieve given genomes/genus. still provide option to
 #       specify local files. check if files exist, if not, download them. Can check against filenames that api provides
 
-# TODO: add arg to specify if - strand should be reverse complemented (default: yes)
-
 # utr always refers to 3'utr in this script unless otherwise specified
 
 import os
