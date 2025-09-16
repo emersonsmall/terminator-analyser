@@ -1,8 +1,3 @@
-# TODO: use ncbi API to retrieve given genomes/genus. still provide option to
-#       specify local files. check if files exist, if not, download them. Can check against filenames that api provides
-
-# utr always refers to 3'utr in this script unless otherwise specified
-
 import os
 import sys
 import concurrent.futures
@@ -13,6 +8,8 @@ from collections import defaultdict
 # External libraries
 import pyfaidx  # https://anaconda.org/bioconda/pyfaidx
 import gffutils # https://anaconda.org/bioconda/gffutils
+
+# utr always refers to 3'UTR unless otherwise specified
 
 OUT_DIR = "out"
 TERMINATORS_DIR = os.path.join(OUT_DIR, "terminators")

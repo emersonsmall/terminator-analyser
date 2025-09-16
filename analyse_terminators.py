@@ -22,6 +22,7 @@ NUE_X_MIN = -35
 NUE_X_MAX = -5
 CE_X_MIN = -10
 CE_X_MAX = 15
+SIGNALS_PLOT_FILENAME = "_signals_plot.png"
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -215,7 +216,7 @@ def main():
         "NUE",
         NUE_X_MIN, 
         NUE_X_MAX,
-        "NUE_signals_plot.png"
+        "NUE" + SIGNALS_PLOT_FILENAME
     )
 
     plot_signal_distribution(
@@ -224,7 +225,7 @@ def main():
         "CE", 
         CE_X_MIN, 
         CE_X_MAX,
-        "CE_signals_plot.png"
+        "CE" + SIGNALS_PLOT_FILENAME
     )
 
     print("\nFINISHED")
