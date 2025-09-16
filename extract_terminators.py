@@ -68,6 +68,11 @@ def get_args() -> argparse.Namespace:
         default=10,
         help="Number of downstream nts to check for internal priming artifacts (default: 10)."
     )
+    parser.add_argument(
+        "--raw-dna",
+        action="store_true",
+        help="Output raw DNA sequences (5' to 3') instead of transcribed RNA."
+    )
 
     args = parser.parse_args()
 
@@ -87,8 +92,10 @@ def is_internal_priming_artifact(downstream_seq: str, filter_consecutive_a: int 
         filter_window_a (int): The minimum number of 'A's in the window to consider it an artifact (default: 8).
         window_size (int): The number of nucleotides to check from the start of the sequence (default: 10).
     """
-    assert window_size > 0, "Window size must be greater than 0."
     assert len(downstream_seq) >= window_size, "Downstream sequence length must be greater than or equal to window size."
+    assert filter_consecutive_a >= 0, "Filter for consecutive A's must be non-negative."
+    assert filter_window_a >= 0, "Filter for total A's in window must be non-negative."
+    assert window_size > 0, "Window size must be greater than 0."
 
     if filter_consecutive_a == 0 and filter_window_a == 0:
         return False
@@ -204,18 +211,18 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, args: 
             if tscript.strand == "+":
                 term_seq = full_utr + downstream_seq # 5' to 3'
             else:
-                term_seq = downstream_seq + full_utr                             # 5' to 3'
-                term_seq = pyfaidx.Sequence(seq=term_seq).reverse.complement.seq # 3' to 5'
+                term_seq = downstream_seq + full_utr
+                term_seq = pyfaidx.Sequence(seq=term_seq).reverse.complement.seq
 
-            final_downstream_seq = term_seq[-args.downstream_nts:]
-
-            if len(final_downstream_seq) < args.filter_window_size:
-                skipped_count += 1
-                continue
-
-            if is_internal_priming_artifact(final_downstream_seq, args.filter_consecutive_a, args.filter_window_a, args.filter_window_size):
-                skipped_count += 1
-                continue
+            if not args.raw_dna:
+                final_downstream_seq = term_seq[-args.downstream_nts:]
+                if len(final_downstream_seq) < args.filter_window_size:
+                    skipped_count += 1
+                    continue
+            
+                if is_internal_priming_artifact(final_downstream_seq, args.filter_consecutive_a, args.filter_window_a, args.filter_window_size):
+                    skipped_count += 1
+                    continue
             
             if term_seq:
                 display_id = tscript.id
@@ -223,7 +230,12 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, args: 
                     raw_id = tscript.attributes["orig_protein_id"][0]
                     display_id = raw_id.split('|')[-1]
                 header = f">{display_id} | {tscript.chrom}:{tscript.start}-{tscript.end}({tscript.strand})"
-                wrapped_seq = textwrap.fill(term_seq.upper(), width=80)
+
+                term_seq = term_seq.upper()
+                if not args.raw_dna:
+                    term_seq = term_seq.replace('T', 'U')
+                
+                wrapped_seq = textwrap.fill(term_seq, width=80)
                 output_records.append(f"{header}\n{wrapped_seq}\n")
             else:
                 skipped_count += 1

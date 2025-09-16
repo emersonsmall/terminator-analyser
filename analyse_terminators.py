@@ -182,7 +182,7 @@ def main():
         for record in fa_records:
             num_terminators += 1
 
-            seq = str(record).upper().replace('T', 'U')
+            seq = str(record).upper()
             total_len = len(seq)
             utr_len = total_len - args.downstream_nts
 
