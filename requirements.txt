@@ -2,3 +2,4 @@ gffutils
 pyfaidx
 pandas
 matplotlib
+requests

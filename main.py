@@ -3,7 +3,7 @@ import sys
 
 from extract_terminators import run_extraction, get_args as get_extract_args
 from analyse_terminators import run_analysis, get_args as get_analyse_args
-
+from get_genomes import run_get_genomes, get_args as get_genomes_args
 
 def main() -> int:
     """
@@ -24,7 +24,12 @@ def main() -> int:
         return 1
 
     try:
-        if known.command == "extract":
+        if known.command == "get":
+            genomes_parser = get_genomes_args(return_parser=True)
+            args = genomes_parser.parse_args(remaining)
+            return run_get_genomes(args)
+
+        elif known.command == "extract":
             extract_parser = get_extract_args(return_parser=True)
             args = extract_parser.parse_args(remaining)
             return run_extraction(args)
@@ -35,6 +40,8 @@ def main() -> int:
             return run_analysis(args)
 
         elif known.command == "full":
+            
+
             extract_parser = get_extract_args(return_parser=True)
             extract_args, _ = extract_parser.parse_known_args(remaining)
 

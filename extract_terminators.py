@@ -33,7 +33,7 @@ def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.Argum
     parser = argparse.ArgumentParser(
         description="Extract terminators for the given genomes/genus."
     )
-    parser.add_argument("input_dir", help="Path to the input folder containing FASTA and GFF files.")
+    parser.add_argument("input_path", help="Path to the input folder containing FASTA and GFF files.")
     parser.add_argument(
         "-d",
         "--downstream-nts",
@@ -76,8 +76,8 @@ def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.Argum
         return parser
 
     args = parser.parse_args()
-    if not os.path.isdir(args.input_dir):
-        parser.error(f"Input directory '{args.input_dir}' does not exist or is not a directory.")
+    if not os.path.isdir(args.input_path):
+        parser.error(f"Input directory '{args.input_path}' does not exist or is not a directory.")
     return args
 
 
@@ -312,7 +312,7 @@ def worker(args: tuple) -> None:
 
 def run_extraction(args: argparse.Namespace) -> int:
     try:
-        file_pairs = find_files(args.input_dir)
+        file_pairs = find_files(args.input_path)
         tasks = [(file_pair[0], file_pair[1], args) for file_pair in file_pairs]
 
         # process each genome in parallel
