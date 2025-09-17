@@ -24,59 +24,60 @@ CE_X_MIN = -10
 CE_X_MAX = 15
 SIGNALS_PLOT_FILENAME = "_signals_plot.png"
 
-def get_args() -> argparse.Namespace:
+def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Analyses the NUE and CE regions of the given terminator sequences."
     )
     parser.add_argument(
         "input_path",
-        help="Path to the terminator sequence FASTA file/s (filepath or directory path).")
+        help="Path to the terminator sequence FASTA file/s (filepath or directory path)."
+    )
     parser.add_argument(
         "-d", 
         "--downstream-nts", 
         type=int, 
         default=50,
-        help="The number of nucleotides downstream of the CS included in the terminators (default: 50)."
+        help="Number of nucleotides downstream of the CS included in the terminators (default: 50)."
     )
     parser.add_argument(
         "-n",
         "--top-n",
         type=int,
         default=20,
-        help="The number of k-mers to report (default: 20)."
+        help="Number of k-mers to report (default: 20)."
     )
     parser.add_argument(
         "-k", 
         "--kmer-size", 
         type=int, 
         default=6,
-        help="The k-mer size (default: 6)."
+        help="K-mer size (default: 6)."
     )
     parser.add_argument(
         "-m",
         "--min-3utr-length",
         type=int,
         default=100,
-        help="The minimum length of 3'UTRs to be included in the analysis (default: 100)."
+        help="Minimum length of 3'UTRs to be included in the analysis (default: 100)."
     )
     parser.add_argument(
         "-s",
         "--step-size",
         type=int,
         default=1,
-        help="The step size for k-mer counting: 1=overlapping (default), kmer_size=non-overlapping."
+        help="Step size for k-mer counting: 1=overlapping (default), kmer_size=non-overlapping."
     )
+
+    if return_parser:
+        return parser
+
     args = parser.parse_args()
-
     if not os.path.exists(args.input_path):
-        parser.error(f"Input path '{args.input_path}' does not exist.")
-
+        parser.error(f"'{args.input_path}' does not exist.")
     if not args.min_3utr_length >= abs(NUE_START):
         parser.error(f"Minimum 3'UTR length must be at least {abs(NUE_START)}.")
-
     if not args.downstream_nts >= CE_END:
         parser.error(f"Downstream nts must be at least {CE_END}.")
-
     return args
 
 
@@ -84,6 +85,7 @@ def get_kmer_counts(sequences: list[str], region_start: int, region_end: int, km
     """
     Counts k-mers at each position in the specified region across all sequences.
     If region_start and region_end are 0, counts k-mers across the whole sequence.
+    
     Args:
         sequences (list[str]): List of sequences to analyze.
         region_start (int): Start position of the region (where last nt of 3'UTR = -1, e.g., -50).
@@ -91,6 +93,12 @@ def get_kmer_counts(sequences: list[str], region_start: int, region_end: int, km
         kmer_size (int): Size of the k-mers to count.
         step_size (int): Step size for k-mer counting (=1: overlapping k-mers. =kmer_size: non-overlapping k-mers)
     """
+    assert isinstance(sequences, list) and all(isinstance(s, str) for s in sequences), "Sequences must be a list of strings."
+    assert isinstance(region_start, int) and isinstance(region_end, int), "Region start and end must be integers."
+    assert region_start <= region_end, "Region start must be less than or equal to region end."
+    assert isinstance(kmer_size, int) and kmer_size > 0, "K-mer size must be a positive integer."
+    assert isinstance(step_size, int) and step_size > 0, "Step size must be a positive integer."
+
     positional_counts = defaultdict(lambda: defaultdict(int))
 
     is_global = (region_start == 0 and region_end == 0)
@@ -115,7 +123,14 @@ def rank_kmers_by_delta(kmer_counts: dict, top_n: int) -> list:
     """
     Ranks k-mers by the difference between their peak and median counts.
     Returns the top N k-mers with the highest delta.
+
+    Args:
+        kmer_counts (dict): Dictionary of k-mer counts by position.
+        top_n (int): Number of top k-mers to return.
     """
+    assert isinstance(kmer_counts, dict), "K-mer counts must be a dictionary."
+    assert isinstance(top_n, int) and top_n > 0, "Top N must be a positive integer."
+
     heap = []
     for kmer, positions in kmer_counts.items():
         if not positions:
@@ -166,9 +181,7 @@ def print_report(region_name: str, kmers: list, kmer_size: int):
         print(f"{rank:<5} | {item['kmer']:<{kmer_size + 2}} | {item['delta']:>15.1f} | {item['peak_count']:>12,} | {item['peak_pos']:>15}")
 
 
-def main():
-    args = get_args()
-
+def run_analysis(args: argparse.Namespace) -> int:
     # Find all fasta files
     fasta_files = []
     if os.path.isdir(args.input_path):
@@ -201,9 +214,9 @@ def main():
             terminators.append(seq)
     
     nue_counts = get_kmer_counts(terminators, NUE_START, NUE_END, args.kmer_size, args.downstream_nts, args.step_size)
-    ranked_nue_kmers = rank_kmers_by_delta(nue_counts, args.top_n)
-
     ce_counts = get_kmer_counts(terminators, CE_START, CE_END, args.kmer_size, args.downstream_nts, args.step_size)
+
+    ranked_nue_kmers = rank_kmers_by_delta(nue_counts, args.top_n)
     ranked_ce_kmers = rank_kmers_by_delta(ce_counts, args.top_n)
 
     print(f"\n{skipped} of {num_terminators} ({(skipped/num_terminators * 100):.2f}%) terminator sequences skipped due to insufficient 3'UTR length")
@@ -228,9 +241,14 @@ def main():
         "CE" + SIGNALS_PLOT_FILENAME
     )
 
-    print("\nFINISHED")
+    print("\nAnalysis finished")
+    return 0
 
+
+def main():
+    """Standalone execution entry point."""
+    args = get_args()
+    return run_analysis(args)
 
 if __name__ == "__main__":
-    exit_code = main()
-    sys.exit(exit_code)
+    sys.exit(main())

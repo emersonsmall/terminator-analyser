@@ -29,21 +29,29 @@ class FileProcessingError(TerminatorExtractionError):
     pass
 
 
-def get_args() -> argparse.Namespace:
+def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Extract terminators for the given genomes/genus."
     )
     parser.add_argument("input_dir", help="Path to the input folder containing FASTA and GFF files.")
     parser.add_argument(
+        "-d",
         "--downstream-nts",
         type=int,
         default=50,
-        help="Number of nucleotides to extract downstream of the terminator (default: 50)."
+        help="Number of nucleotides downstream of the CS to extract (default: 50)."
     )
     parser.add_argument(
-        "--equal-length",
+        "-r",
+        "--raw-dna",
         action="store_true",
-        help="Buffer terminator sequences so that they are all equal length."
+        help="Output raw DNA sequences instead of transcribed RNA."
+    )
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        default=TERMINATORS_DIR,
+        help="Path to the output directory (default: 'out/terminators')."
     )
     parser.add_argument(
         "--filter-consecutive-a",
@@ -63,29 +71,29 @@ def get_args() -> argparse.Namespace:
         default=10,
         help="Number of downstream nts to check for internal priming artifacts (default: 10)."
     )
-    parser.add_argument(
-        "--raw-dna",
-        action="store_true",
-        help="Output raw DNA sequences (5' to 3') instead of transcribed RNA."
-    )
+
+    if return_parser:
+        return parser
 
     args = parser.parse_args()
-
     if not os.path.isdir(args.input_dir):
         parser.error(f"Input directory '{args.input_dir}' does not exist or is not a directory.")
-    
     return args
 
 
 def is_internal_priming_artifact(downstream_seq: str, filter_consecutive_a: int = 6, filter_window_a: int = 8, window_size: int = 10) -> bool:
     """
     Checks if the given downstream sequence is likely to be an internal priming artifact.
-    Methodology based on Beaudong et al. DOI: 10.1101/gr.10.7.1001 
+    Methodology based on Beaudong et al. DOI: 10.1101/gr.10.7.1001
+
     Args:
         downstream_seq (str): The downstream sequence to check.
         filter_consecutive_a (int): The minimum number of consecutive 'A's to consider it an artifact (default: 6).
         filter_window_a (int): The minimum number of 'A's in the window to consider it an artifact (default: 8).
         window_size (int): The number of nucleotides to check from the start of the sequence (default: 10).
+
+    Returns:
+        bool: True if the sequence is an internal priming artifact, False otherwise.
     """
     assert len(downstream_seq) >= window_size, "Downstream sequence length must be greater than or equal to window size."
     assert filter_consecutive_a >= 0, "Filter for consecutive A's must be non-negative."
@@ -113,10 +121,10 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, args: 
     Extracts terminator sequences (3'UTR + downstream region) from the given fasta and gff files.
 
     Args:
-        fasta_fpath (str): Path to the fasta file.
-        gff_fpath (str): Path to the gff file.
-        out_fpath (str): Path to the output fasta file to write terminator sequences to.
-        dstream_nts (int): Number of nucleotides to extract downstream of the 3'UTR.
+        fasta_fpath (str): Filepath to the input FASTA file.
+        gff_fpath (str): Filepath to the input GFF file.
+        out_fpath (str): Output filepath to write terminator sequences to.
+        args (argparse.Namespace): Parsed command-line arguments.
     """
     assert os.path.isfile(fasta_fpath), f"Fasta file '{fasta_fpath}' does not exist."
     assert os.path.isfile(gff_fpath), f"GFF file '{gff_fpath}' does not exist."
@@ -254,7 +262,7 @@ def find_files(dir: str) -> list[tuple[str, str]]:
         dir (str): The path to the directory to search.
     
     Returns:
-        list[tuple[str, str]]: A list of tuples, where each tuple is a pair of fasta and gff file paths.
+        list[tuple[str, str]]: A list of tuples, where each tuple is a pair of FASTA and GFF file paths.
     """
     assert os.path.isdir(dir), f"Folder '{dir}' does not exist or is not a directory."
 
@@ -285,11 +293,12 @@ def find_files(dir: str) -> list[tuple[str, str]]:
     return file_pairs
 
 
-def worker(args):
+def worker(args: tuple) -> None:
     """
     Extracts the terminator sequences of a single genome.
+
     Args:
-        args (tuple): A tuple containing (fasta_fpath, gff_fpath, dstream_nts).
+        args (tuple): A tuple containing (fasta_fpath, gff_fpath, cli_args).
     """
     fasta_fpath, gff_fpath, cli_args = args
     genome_name = os.path.basename(fasta_fpath).split('.')[0]
@@ -301,12 +310,9 @@ def worker(args):
     extract_terminators(fasta_fpath, gff_fpath, terminators_fpath, cli_args)
 
 
-def main() -> int:
+def run_extraction(args: argparse.Namespace) -> int:
     try:
-        args = get_args()
-
         file_pairs = find_files(args.input_dir)
-
         tasks = [(file_pair[0], file_pair[1], args) for file_pair in file_pairs]
 
         # process each genome in parallel
@@ -322,11 +328,15 @@ def main() -> int:
     except Exception as e:
         print(f"\nAn unexpected error occurred: {e}", file=sys.stderr)
         return 1
-    
-    print("\nFINISHED")
+
+    print("\nTerminator extraction finished")
     return 0
 
 
+def main() -> int:
+    """Standalone execution entry point."""
+    args = get_args()
+    return run_extraction(args)
+
 if __name__ == "__main__":
-    exit_code = main()
-    sys.exit(exit_code)
+    sys.exit(main())
