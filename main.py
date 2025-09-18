@@ -14,6 +14,7 @@ def main() -> int:
         description="Terminator Analysis Pipeline"
     )
     subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser("get", help="Get all reference genomes for a given taxon.")
     subparsers.add_parser("extract", help="Extract terminator sequences from FASTA and GFF files.")
     subparsers.add_parser("analyse", help="Analyse NUEs and CEs of terminator sequences.")
     subparsers.add_parser("full", help="Runs the full pipeline: get, extract, and analyse")
@@ -40,7 +41,12 @@ def main() -> int:
             return run_analysis(args)
 
         elif known.command == "full":
-            
+            genomes_parser = get_genomes_args(return_parser=True)
+            genomes_args, _ = genomes_parser.parse_known_args(remaining)
+            exit_code = run_get_genomes(genomes_args)
+            if exit_code != 0:
+                print("\nERROR: Genome retrieval step failed. Aborting", file=sys.stderr)
+                return exit_code
 
             extract_parser = get_extract_args(return_parser=True)
             extract_args, _ = extract_parser.parse_known_args(remaining)

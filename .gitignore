@@ -1,9 +1,6 @@
 # Output folder
 out/
 
-# Venv folder
-egh400/
-
 *.db
 
 # Byte-compiled / optimized / DLL files

@@ -12,8 +12,6 @@ import gffutils # https://anaconda.org/bioconda/gffutils
 # utr always refers to 3'UTR unless otherwise specified
 
 OUT_DIR = "out"
-TERMINATORS_DIR = os.path.join(OUT_DIR, "terminators")
-DB_DIR = os.path.join(OUT_DIR, "gff_dbs")
 
 # --- Exceptions ---
 class TerminatorExtractionError(Exception):
@@ -50,7 +48,7 @@ def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.Argum
     parser.add_argument(
         "-o",
         "--output-dir",
-        default=TERMINATORS_DIR,
+        default=os.path.join(OUT_DIR, "terminators"),
         help="Path to the output directory (default: 'out/terminators')."
     )
     parser.add_argument(
@@ -116,40 +114,44 @@ def is_internal_priming_artifact(downstream_seq: str, filter_consecutive_a: int 
     return False
 
 
-def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, args: argparse.Namespace) -> None:
+def extract_terminators(fasta_fpath: str, gff_fpath: str, args: argparse.Namespace) -> None:
     """
     Extracts terminator sequences (3'UTR + downstream region) from the given fasta and gff files.
 
     Args:
         fasta_fpath (str): Filepath to the input FASTA file.
         gff_fpath (str): Filepath to the input GFF file.
-        out_fpath (str): Output filepath to write terminator sequences to.
         args (argparse.Namespace): Parsed command-line arguments.
     """
     assert os.path.isfile(fasta_fpath), f"Fasta file '{fasta_fpath}' does not exist."
     assert os.path.isfile(gff_fpath), f"GFF file '{gff_fpath}' does not exist."
 
-    genome_name = os.path.basename(fasta_fpath).split('.')[0]
-    os.makedirs(DB_DIR, exist_ok=True)
-    db_path = os.path.join(DB_DIR, f"{genome_name}.db")
+    terminators_dir = args.output_dir
+    db_dir = os.path.join(os.path.dirname(terminators_dir), "gff_dbs")
+    os.makedirs(terminators_dir, exist_ok=True)
+    os.makedirs(db_dir, exist_ok=True)
 
-    if not os.path.isfile(db_path):
+    fname = os.path.basename(fasta_fpath).split('.')[0]
+    db_fpath = os.path.join(db_dir, f"{fname}.db")
+    terminators_fpath = os.path.join(terminators_dir, f"{fname}_terminators.fa")
+
+    if not os.path.isfile(db_fpath):
         try:
-            print(f"Creating GFF database for '{genome_name}'")
+            print(f"Creating GFF database for '{fname}'")
             gffutils.create_db(
                 gff_fpath,
-                dbfn=db_path,
+                dbfn=db_fpath,
                 keep_order=True,
                 merge_strategy="create_unique",
                 sort_attribute_values=True,
             )
         except Exception as e:
-            raise GFFParsingError(f"Error creating GFF database for '{genome_name}': {e}")
+            raise GFFParsingError(f"Error creating GFF database for '{fname}': {e}")
     else:
-        print(f"Using existing GFF database for '{genome_name}': '{db_path}'")
+        print(f"Using existing GFF database for '{fname}': '{db_fpath}'")
     
     fasta = pyfaidx.Fasta(fasta_fpath)
-    db = gffutils.FeatureDB(db_path)
+    db = gffutils.FeatureDB(db_fpath)
     output_records = []
     skipped_count = 0
 
@@ -197,7 +199,7 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, args: 
                 downstream_end = tscript.start - 1
 
             else:
-                print(f"WARNING: unknown strand '{tscript.strand}' for feature '{tscript.id}' in '{genome_name}'", file=sys.stderr)
+                print(f"WARNING: unknown strand '{tscript.strand}' for feature '{tscript.id}' in '{fname}'", file=sys.stderr)
                 skipped_count += 1
                 continue
             
@@ -245,13 +247,13 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, out_fpath: str, args: 
                 continue
 
         except Exception as e:
-            print(f"WARNING: could not process feature '{tscript.id}' in '{genome_name}': {e}", file=sys.stderr)
+            print(f"WARNING: could not process feature '{tscript.id}' in '{fname}': {e}", file=sys.stderr)
             continue
         
-    with open(out_fpath, 'w') as out_f:
+    with open(terminators_fpath, 'w') as out_f:
         out_f.writelines(output_records)
     
-    print(f"Extracted {len(output_records)} terminator sequences from '{genome_name}'\nskipped {skipped_count} transcripts")
+    print(f"Extracted {len(output_records)} terminator sequences from '{fname}'\nskipped {skipped_count} transcripts")
 
 
 def find_files(dir: str) -> list[tuple[str, str]]:
@@ -301,13 +303,10 @@ def worker(args: tuple) -> None:
         args (tuple): A tuple containing (fasta_fpath, gff_fpath, cli_args).
     """
     fasta_fpath, gff_fpath, cli_args = args
-    genome_name = os.path.basename(fasta_fpath).split('.')[0]
+    fname = os.path.basename(fasta_fpath).split('.')[0]
 
-    print(f"Processing genome '{genome_name}'")
-    os.makedirs(TERMINATORS_DIR, exist_ok=True)
-    terminators_fpath = os.path.join(TERMINATORS_DIR, f"{genome_name}_terminators.fa")
-
-    extract_terminators(fasta_fpath, gff_fpath, terminators_fpath, cli_args)
+    print(f"Processing genome '{fname}'")
+    extract_terminators(fasta_fpath, gff_fpath, cli_args)
 
 
 def run_extraction(args: argparse.Namespace) -> int:

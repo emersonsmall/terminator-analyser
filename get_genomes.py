@@ -4,31 +4,64 @@ import argparse
 import requests
 import zipfile
 import io
+from typing import Optional
+import tempfile
+import shutil
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-API_BASE_URL = "https://api.ncbi.nlm.nih.gov/datasets/v2"
-GENOMES_DIR = os.path.join("out", "genomes")
+GENBANK_API_BASE_URL = "https://api.ncbi.nlm.nih.gov/datasets/v2"
+DEFAULT_OUT_DIR = "out"
 
 class GenomeRetrievalError(Exception):
     """Base exception for this script."""
     pass
 
 def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.ArgumentParser:
+    """
+    If return_parser==False (standalone): taxon is required positional.
+    If return_parser==True (pipeline use): return parser with --taxon optional and download flags.
+    """
     parser = argparse.ArgumentParser(
         description="Retrieve all reference genomes from NCBI Datasets API for the given taxon."
     )
     parser.add_argument(
-        "--taxon",
-        help="Taxon name (e.g., 'Homo sapiens' or 'Arabidopsis')."
-    )
-    parser.add_argument(
         "--api-key",
         default=os.environ.get("NCBI_API_KEY"),
-        help="NCBI API key. Can also be set via NCBI_API_KEY environment variable."
+        help="NCBI API key. Can be set via NCBI_API_KEY environment variable."
     )
     parser.add_argument(
-        "--genomes-dir",
-        default=GENOMES_DIR,
-        help="Parent directory to save downloaded genomes to (default: ./out/genomes)"
+        "-o",
+        "--output-dir",
+        default=DEFAULT_OUT_DIR,
+        help=f"Path to the output directory (default: /{DEFAULT_OUT_DIR})."
+    )
+    parser.add_argument(
+        "--max-genomes",
+        type=int,
+        default=None,
+        help="Maximum number of genomes to download (default: None)."
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force re-download of genomes even if files already exist."
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=30,
+        help="HTTP timeout in seconds (default: 30)."
+    )
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=3,
+        help="Number of times to retry failed HTTP requests (default: 3)."
+    )
+    parser.add_argument(
+        "taxon",
+        help="Taxon name (e.g., 'Homo sapiens' or 'Arabidopsis')."
     )
 
     if return_parser:
@@ -37,95 +70,209 @@ def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.Argum
     return parser.parse_args()
 
 
-def get_genomes_by_taxon(taxon: str, api_key: str, genomes_dir: str) -> str:
+def get_genomes_by_taxon(
+        taxon: str, 
+        api_key: str, 
+        output_dir: str, 
+        session: requests.Session,
+        max_genomes: Optional[int] = None,
+        force: bool = False,
+        chunk_size: int = 32 * 1024
+    ) -> str:
     """
     Finds, downloads, and extracts all reference genomes for a given taxon.
     """
     print(f"Searching for reference genomes for taxon '{taxon}'")
-    report_url = f"{API_BASE_URL}/genome/taxon/{requests.utils.quote(taxon)}/dataset_report?filters.reference_only=true"
-    report_res = _api_request(report_url, api_key)
-
+    report_url = f"{GENBANK_API_BASE_URL}/genome/taxon/{requests.utils.quote(taxon)}/dataset_report?filters.reference_only=true"
+    report_res = _api_request(session, report_url, api_key)
     reports = report_res.get("reports")
     if not reports:
         raise GenomeRetrievalError(f"No reference genomes found for taxon '{taxon}'")
+
+    if max_genomes is not None:
+        reports = reports[:max_genomes]
 
     num_genomes = len(reports)
     print(f"Found {num_genomes} reference genomes")
 
     taxon_dir_name = taxon.replace(" ", "_")
-    taxon_path = os.path.join(genomes_dir, taxon_dir_name)
-    os.makedirs(taxon_path, exist_ok=True)
+    genomes_dir_path = os.path.join(output_dir, "taxons", taxon_dir_name, "genomes")
+    os.makedirs(genomes_dir_path, exist_ok=True)
 
-    for i, report in enumerate(reports):
+    for i, report in enumerate(reports, start=1):
         accession = report.get("accession")
         if not accession:
             print(f"Skipping genome with missing accession: {report}")
             continue
 
         organism_name = report.get("organism").get("organism_name", "N/A")
-        print(f"\nProcessing genome {i+1}/{num_genomes}: {accession} ({organism_name})")
+        print(f"\nProcessing genome {i}/{num_genomes}: {accession} ({organism_name})")
 
-        existing_files = os.listdir(taxon_path)
+        existing_files = os.listdir(genomes_dir_path)
         has_fasta = any(f.startswith(accession) and f.endswith((".fna", ".fa", ".fasta")) for f in existing_files)
-        has_gff = any(f.startswith(accession) and f.endswith(".gff") for f in existing_files)
+        has_gff = any(f.startswith(accession) and f.endswith((".gff", ".gff3")) for f in existing_files)
 
         if has_fasta and has_gff:
             print(f"Genome {accession} already downloaded. Skipping.")
             continue
 
-        download_url = f"{API_BASE_URL}/genome/accession/{accession}/download?include_annotation_type=GENOME_FASTA,GENOME_GFF"
-        _download_and_unzip(download_url, api_key, taxon_path, accession)
+        download_url = f"{GENBANK_API_BASE_URL}/genome/accession/{accession}/download?include_annotation_type=GENOME_FASTA,GENOME_GFF"
+        _download_and_unzip(session, download_url, api_key, genomes_dir_path, accession, force=force, chunk_size=chunk_size)
     
-    return taxon_path
+    return genomes_dir_path
 
 
 def run_get_genomes(args: argparse.Namespace) -> int:
-    if args.taxon:
-        get_genomes_by_taxon(args.taxon, args.api_key, args.genomes_dir)
-        return 0
-    
-    elif hasattr(args, 'input_path') and args.input_path:
-        if not os.path.isdir(args.input_path):
-            raise FileNotFoundError(f"Input path '{args.input_path}' does not exist or is not a directory.")
-        print(f"Using local genome files from: '{args.input_path}'")
-        return 0
-    else:
-        raise ValueError("An input source is required.")
+    """
+    Execute get genomes logic:
+        - If args.taxon present: download and set args.input_path = downloaded dir (for pipeline).
+        - Else: error (standalone requires positional taxon; pipeline should only call this if download needed).
+    """
+    if not args.taxon:
+        print("ERROR: Taxon name is required to download genomes.", file=sys.stderr)
+        return 1
+
+    session = _build_session(timeout=args.timeout, retries=args.retries)
+    try:
+        try:
+            taxon_path = get_genomes_by_taxon(
+                taxon=args.taxon,
+                api_key=args.api_key,
+                output_dir=args.output_dir,
+                session=session,
+                max_genomes=args.max_genomes,
+                force=args.force,
+            )
+
+            args.input_path = taxon_path
+            print(f"\nDownloaded genomes saved to: {taxon_path}")
+            return 0
+        except GenomeRetrievalError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 # Helper functions
-def _api_request(url: str, api_key: str) -> dict:
-    headers = {"Accept": "application/json", "api-key": api_key} if api_key else {"Accept": "application/json"}
+def _build_session(timeout: int = 30, retries: int = 3, backoff_factor: float = 0.3) -> requests.Session:
+    """
+    Return a requests.Session configured with retry logic.
+    Retries restricted to GET
+    Caller responsible for calling session.close()
+    """
+    s = requests.Session()
+
+    s.headers.update({
+        "Accept": "application/zip, application/octet-stream, */*"
+    })
+    
+    # only retry for GET
+    allowed = frozenset(['GET'])
     try:
-        res = requests.get(url, headers=headers)
+        retry = Retry(
+            total=retries,
+            backoff_factor=backoff_factor,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=allowed,
+            raise_on_status=False
+        )
+    except TypeError:
+        # older urllib3 versions use method_whitelist
+        retry = Retry(
+            total=retries,
+            backoff_factor=backoff_factor,
+            status_forcelist=[429, 500, 502, 503, 504],
+            method_whitelist=allowed,
+            raise_on_status=False
+        )
+    
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+
+    s.request_timeout = timeout
+    return s
+
+
+def _api_request(session: requests.Session, url: str, api_key: str) -> dict:
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["api-key"] = api_key
+    try:
+        res = session.get(url, headers=headers, timeout=session.request_timeout)
         res.raise_for_status()
         return res.json()
     except requests.RequestException as e:
         raise GenomeRetrievalError(f"API request failed for URL {url}: {e}")
 
 
-def _download_and_unzip(url: str, api_key: str, out_dir: str, accession: str) -> None:
-    headers = {"api-key": api_key} if api_key else {}
-    print(f"Downloading files to '{out_dir}'")
-    try:
-        with requests.get(url, headers=headers, stream=True) as res:
-            res.raise_for_status()
-            with zipfile.ZipFile(io.BytesIO(res.content)) as z:
-                for file_info in z.infolist():
-                    filename = os.path.basename(file_info.filename)
+def _download_and_unzip(
+        session: requests.Session, 
+        url: str, api_key: str | None, 
+        out_dir: str, accession: str, 
+        force: bool = False, 
+        chunk_size: int = 32 * 1024
+    ) -> None:
+    """
+    Stream-download the zip at `url` into a temp file on disk, then open it with zipfile.ZipFile
+    and extract FASTA/GFF files to `out_dir` with filenames prefixed by `accession`.
 
-                    if filename.endswith(('.fna', '.fa', '.fasta')):
-                        with z.open(file_info) as src, open(os.path.join(out_dir, f"{accession}.fna"), 'wb') as dest:
-                            dest.write(src.read())
-                            
-                    elif filename.endswith('.gff'):
-                        with z.open(file_info) as src, open(os.path.join(out_dir, f"{accession}.gff"), 'wb') as dest:
-                            dest.write(src.read())
-                    
-    except requests.RequestException as e:
-        raise GenomeRetrievalError(f"Download failed for URL {url}: {e}")
-    except zipfile.BadZipFile as e:
-        raise GenomeRetrievalError(f"Failed to unzip downloaded content from {url}: {e}")
+    Uses session.
+    Writes downloaded ZIP to temp file to avoid memory issues with large files.
+    Writes each extracted file to a temp file then os.replace() to final destination.
+    """
+    headers = {}
+    if api_key:
+        headers["api-key"] = api_key
+
+    os.makedirs(out_dir, exist_ok=True)
+
+    tmp_zip = None
+    try:
+        with session.get(url, headers=headers, stream=True, timeout=session.request_timeout) as res:
+            res.raise_for_status()
+            tmp_fd, tmp_zip = tempfile.mkstemp(prefix="datasets_download_", suffix=".zip", dir=out_dir)
+            os.close(tmp_fd)
+            with open(tmp_zip, 'wb') as f:
+                for chunk in res.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        f.write(chunk)
+            
+            # open zipfile from disk
+            with zipfile.ZipFile(tmp_zip, 'r') as z:
+                for member in z.infolist():
+                    filename = os.path.basename(member.filename)
+                    if not filename:
+                        continue
+                    lower = filename.lower()
+                    if lower.endswith((".fna", ".fa", ".fasta")):
+                        out_fname = f"{accession}.fna"
+                    elif lower.endswith((".gff", ".gff3")):
+                        out_fname = f"{accession}.gff"
+                    else:
+                        continue
+
+                    out_path = os.path.join(out_dir, out_fname)
+                    if os.path.exists(out_path) and not force:
+                        print(f"File {out_fname} already exists. Skipping.")
+                        continue
+                        
+                    # extract member -> temp file then atomic replace
+                    with z.open(member) as src:
+                        with tempfile.NamedTemporaryFile(delete=False, dir=out_dir) as tmpf:
+                            shutil.copyfileobj(src, tmpf)
+                            temp_name = tmpf.name
+                        os.replace(temp_name, out_path)
+    finally:
+        if tmp_zip and os.path.exists(tmp_zip):
+            try:
+                os.remove(tmp_zip)
+            except Exception:
+                pass   
 
 
 def main() -> int:
