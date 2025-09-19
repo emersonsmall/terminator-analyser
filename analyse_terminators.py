@@ -33,6 +33,12 @@ def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.Argum
         help="Path to the terminator sequence FASTA file/s (filepath or directory path)."
     )
     parser.add_argument(
+        "-o", 
+        "--output-dir", 
+        default="out",
+        help="Path to the output directory (default: ./out)."
+    )
+    parser.add_argument(
         "-d", 
         "--downstream-nts", 
         type=int, 
@@ -65,7 +71,7 @@ def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.Argum
         "--step-size",
         type=int,
         default=1,
-        help="Step size for k-mer counting: 1=overlapping (default), kmer_size=non-overlapping."
+        help="Step size for k-mer counting (default: 1)."
     )
 
     if return_parser:
@@ -223,13 +229,18 @@ def run_analysis(args: argparse.Namespace) -> int:
     print_report("CE", ranked_ce_kmers, args.kmer_size)
     print_report("NUE", ranked_nue_kmers, args.kmer_size)
 
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    nue_plot_path = os.path.join(args.output_dir, "NUE" + SIGNALS_PLOT_FILENAME)
+    ce_plot_path = os.path.join(args.output_dir, "CE" + SIGNALS_PLOT_FILENAME)
+
     plot_signal_distribution(
         ranked_nue_kmers, 
         nue_counts, 
         "NUE",
         NUE_X_MIN, 
         NUE_X_MAX,
-        "NUE" + SIGNALS_PLOT_FILENAME
+        nue_plot_path
     )
 
     plot_signal_distribution(
@@ -238,7 +249,7 @@ def run_analysis(args: argparse.Namespace) -> int:
         "CE", 
         CE_X_MIN, 
         CE_X_MAX,
-        "CE" + SIGNALS_PLOT_FILENAME
+        ce_plot_path
     )
 
     print("\nAnalysis finished")

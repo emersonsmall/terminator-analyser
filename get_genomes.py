@@ -3,7 +3,6 @@ import sys
 import argparse
 import requests
 import zipfile
-import io
 from typing import Optional
 import tempfile
 import shutil
@@ -11,7 +10,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 GENBANK_API_BASE_URL = "https://api.ncbi.nlm.nih.gov/datasets/v2"
-DEFAULT_OUT_DIR = "out"
+RETRIES = 3
+TIMEOUT = 30  # seconds
 
 class GenomeRetrievalError(Exception):
     """Base exception for this script."""
@@ -33,8 +33,8 @@ def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.Argum
     parser.add_argument(
         "-o",
         "--output-dir",
-        default=DEFAULT_OUT_DIR,
-        help=f"Path to the output directory (default: /{DEFAULT_OUT_DIR})."
+        default="out",
+        help="Path to the output directory (default: /out)."
     )
     parser.add_argument(
         "--max-genomes",
@@ -48,18 +48,6 @@ def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.Argum
         help="Force re-download of genomes even if files already exist."
     )
     parser.add_argument(
-        "--timeout",
-        type=int,
-        default=30,
-        help="HTTP timeout in seconds (default: 30)."
-    )
-    parser.add_argument(
-        "--retries",
-        type=int,
-        default=3,
-        help="Number of times to retry failed HTTP requests (default: 3)."
-    )
-    parser.add_argument(
         "taxon",
         help="Taxon name (e.g., 'Homo sapiens' or 'Arabidopsis')."
     )
@@ -71,9 +59,9 @@ def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.Argum
 
 
 def get_genomes_by_taxon(
-        taxon: str, 
-        api_key: str, 
-        output_dir: str, 
+        taxon: str,
+        api_key: str,
+        output_dir: str,
         session: requests.Session,
         max_genomes: Optional[int] = None,
         force: bool = False,
@@ -82,6 +70,7 @@ def get_genomes_by_taxon(
     """
     Finds, downloads, and extracts all reference genomes for a given taxon.
     """
+    taxon = taxon.strip().lower()
     print(f"Searching for reference genomes for taxon '{taxon}'")
     report_url = f"{GENBANK_API_BASE_URL}/genome/taxon/{requests.utils.quote(taxon)}/dataset_report?filters.reference_only=true"
     report_res = _api_request(session, report_url, api_key)
@@ -93,7 +82,13 @@ def get_genomes_by_taxon(
         reports = reports[:max_genomes]
 
     num_genomes = len(reports)
-    print(f"Found {num_genomes} reference genomes")
+    print(f"\nFound {num_genomes} reference genomes:")
+    print("Organism name | Common name | Accession")
+    for report in reports:
+        accession = report.get("accession", "N/A")
+        organism_name = report.get("organism", {}).get("organism_name", "N/A")
+        common_name = report.get("organism", {}).get("common_name", "N/A")
+        print(f" - {organism_name} | {common_name} | {accession}")
 
     taxon_dir_name = taxon.replace(" ", "_")
     genomes_dir_path = os.path.join(output_dir, "taxons", taxon_dir_name, "genomes")
@@ -106,16 +101,16 @@ def get_genomes_by_taxon(
             continue
 
         organism_name = report.get("organism").get("organism_name", "N/A")
-        print(f"\nProcessing genome {i}/{num_genomes}: {accession} ({organism_name})")
 
         existing_files = os.listdir(genomes_dir_path)
         has_fasta = any(f.startswith(accession) and f.endswith((".fna", ".fa", ".fasta")) for f in existing_files)
         has_gff = any(f.startswith(accession) and f.endswith((".gff", ".gff3")) for f in existing_files)
 
         if has_fasta and has_gff:
-            print(f"Genome {accession} already downloaded. Skipping.")
+            print(f"\n{accession} genome already downloaded. Skipping.")
             continue
 
+        print(f"\nDownloading genome {i}/{num_genomes}: {accession} ({organism_name})")
         download_url = f"{GENBANK_API_BASE_URL}/genome/accession/{accession}/download?include_annotation_type=GENOME_FASTA,GENOME_GFF"
         _download_and_unzip(session, download_url, api_key, genomes_dir_path, accession, force=force, chunk_size=chunk_size)
     
@@ -132,7 +127,7 @@ def run_get_genomes(args: argparse.Namespace) -> int:
         print("ERROR: Taxon name is required to download genomes.", file=sys.stderr)
         return 1
 
-    session = _build_session(timeout=args.timeout, retries=args.retries)
+    session = _build_session(timeout=TIMEOUT, retries=RETRIES)
     try:
         try:
             taxon_path = get_genomes_by_taxon(
