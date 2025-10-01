@@ -24,10 +24,6 @@ SIGNALS_PLOT_FILENAME = "_signals_plot.png"
 
 def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
     parser.add_argument(
-        "input_path",
-        help="Path to the terminator sequence FASTA file/s (filepath or directory path)."
-    )
-    parser.add_argument(
         "-n",
         "--top-n",
         type=int,
@@ -57,6 +53,10 @@ def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True)
     )
 
     if standalone:
+        parser.add_argument(
+            "input_path",
+            help="Path to the terminator sequence FASTA file/s (filepath or directory path)."
+        )
         parser.add_argument(
             "-o", 
             "--output-dir", 
@@ -246,7 +246,7 @@ def run_analysis(args: argparse.Namespace) -> int:
     plot_signal_distribution(
         ranked_ce_kmers, 
         ce_counts, 
-        "CE", 
+        "CE",
         PLOT_CE_X_MIN, 
         PLOT_CE_X_MAX,
         ce_plot_path

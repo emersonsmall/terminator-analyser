@@ -9,26 +9,9 @@ from collections import defaultdict
 import pyfaidx  # https://anaconda.org/bioconda/pyfaidx
 import gffutils # https://anaconda.org/bioconda/gffutils
 
-# utr always refers to 3'UTR unless otherwise specified
-
-OUT_DIR = "out"
-
-# --- Exceptions ---
-class TerminatorExtractionError(Exception):
-    """Base exception for this script."""
-    pass
-
-class GFFParsingError(TerminatorExtractionError):
-    """Exception for errors parsing GFF files."""
-    pass
-
-class FileProcessingError(TerminatorExtractionError):
-    """Exception for errors during file processing."""
-    pass
-
+# UTR refers to 3'UTR unless otherwise specified
 
 def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
-    parser.add_argument("input_path", help="Path to the input folder containing FASTA and GFF files.")
     parser.add_argument(
         "-r",
         "--raw-dna",
@@ -56,10 +39,14 @@ def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True)
 
     if standalone:
         parser.add_argument(
+            "input_path",
+            help="Path to the input folder containing FASTA and GFF files."
+        )
+        parser.add_argument(
             "-o",
             "--output-dir",
-            default=os.path.join(OUT_DIR, "terminators"),
-            help="Path to the output directory (default: 'out/terminators')."
+            default=os.path.join("out", "terminators"),
+            help="Path to the output directory (default: './out/terminators')."
         )
         parser.add_argument(
             "-d",
@@ -82,36 +69,36 @@ def _get_args() -> argparse.Namespace:
     return args
 
 
-def is_internal_priming_artifact(downstream_seq: str, filter_consecutive_a: int = 6, filter_window_a: int = 8, window_size: int = 10) -> bool:
+def is_internal_priming_artifact(sequence: str, consecutive_a: int = 6, total_a: int = 8, window_size: int = 10) -> bool:
     """
     Checks if the given downstream sequence is likely to be an internal priming artifact.
     Methodology based on Beaudong et al. DOI: 10.1101/gr.10.7.1001
 
     Args:
-        downstream_seq (str): The downstream sequence to check.
-        filter_consecutive_a (int): The minimum number of consecutive 'A's to consider it an artifact (default: 6).
-        filter_window_a (int): The minimum number of 'A's in the window to consider it an artifact (default: 8).
+        sequence (str): The downstream sequence to check.
+        consecutive_a (int): The number of consecutive 'A's to consider the sequence an artifact (default: 6).
+        window_a (int): The total number of 'A's in the window to consider the sequence an artifact (default: 8).
         window_size (int): The number of nucleotides to check from the start of the sequence (default: 10).
 
     Returns:
         bool: True if the sequence is an internal priming artifact, False otherwise.
     """
-    assert len(downstream_seq) >= window_size, "Downstream sequence length must be greater than or equal to window size."
-    assert filter_consecutive_a >= 0, "Filter for consecutive A's must be non-negative."
-    assert filter_window_a >= 0, "Filter for total A's in window must be non-negative."
+    assert len(sequence) >= window_size, "Downstream sequence length must be greater than or equal to window size."
+    assert consecutive_a >= 0, "Filter for consecutive A's must be non-negative."
+    assert total_a >= 0, "Filter for total A's in window must be non-negative."
     assert window_size > 0, "Window size must be greater than 0."
 
-    if filter_consecutive_a == 0 and filter_window_a == 0:
+    if consecutive_a == 0 and total_a == 0:
         return False
     
-    region_to_check = downstream_seq[:window_size].upper()
+    region_to_check = sequence[:window_size].upper()
 
     # check for consecutive A's
-    if filter_consecutive_a > 0 and 'A' * filter_consecutive_a in region_to_check:
+    if consecutive_a > 0 and 'A' * consecutive_a in region_to_check:
         return True
     
     # check for total A's in window
-    if filter_window_a > 0 and region_to_check.count('A') >= filter_window_a:
+    if total_a > 0 and region_to_check.count('A') >= total_a:
         return True
     
     return False
@@ -149,7 +136,7 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, args: argparse.Namespa
                 sort_attribute_values=True,
             )
         except Exception as e:
-            raise GFFParsingError(f"Error creating GFF database for '{fname}': {e}")
+            raise Exception(f"Error creating GFF database for '{fname}': {e}")
     else:
         print(f"Using existing GFF database for '{fname}': '{db_fpath}'")
     
@@ -293,7 +280,7 @@ def find_files(dir: str) -> list[tuple[str, str]]:
             print(f"WARNING: Incomplete file pair for '{basename}'. Skipping. Found: {list(paths.keys())}", file=sys.stderr)
     
     if not file_pairs:
-        raise FileProcessingError(f"No valid FASTA and GFF file pairs found in directory '{dir}'.")
+        raise Exception(f"No valid FASTA and GFF file pairs found in directory '{dir}'.")
 
     return file_pairs
 
