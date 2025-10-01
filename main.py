@@ -2,9 +2,9 @@ import argparse
 import sys
 import os
 
-from extract_terminators import run_extraction, get_args as get_extract_args
-from analyse_terminators import run_analysis, get_args as get_analyse_args
-from get_genomes import run_get_genomes, get_args as get_genomes_args
+from extract_terminators import run_extraction, _get_args as get_extract_args
+from analyse_terminators import run_analysis, _get_args as get_analyse_args
+from get_genomes import run_get_genomes, _get_args as get_genomes_args
 
 def main() -> int:
     """

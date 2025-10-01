@@ -11,30 +11,25 @@ from urllib3.util.retry import Retry
 
 GENBANK_API_BASE_URL = "https://api.ncbi.nlm.nih.gov/datasets/v2"
 RETRIES = 3
-TIMEOUT = 30  # seconds
+TIMEOUT_IN_SECONDS = 30
+CHUNK_SIZE = 32 * 1024 # 32KB
+BACKOFF_FACTOR = 0.3
 
 class GenomeRetrievalError(Exception):
     """Base exception for this script."""
     pass
 
-def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.ArgumentParser:
-    """
-    If return_parser==False (standalone): taxon is required positional.
-    If return_parser==True (pipeline use): return parser with --taxon optional and download flags.
-    """
-    parser = argparse.ArgumentParser(
-        description="Retrieve all reference genomes from NCBI Datasets API for the given taxon."
+
+def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
+    """Adds genome retrieval arguments to the given parser."""
+    parser.add_argument(
+        "taxon",
+        help="Taxon name (e.g., 'Arabidopsis' or 'Arabidopsis thaliana')."
     )
     parser.add_argument(
         "--api-key",
         default=os.environ.get("NCBI_API_KEY"),
         help="NCBI API key. Can be set via NCBI_API_KEY environment variable."
-    )
-    parser.add_argument(
-        "-o",
-        "--output-dir",
-        default="out",
-        help="Path to the output directory (default: /out)."
     )
     parser.add_argument(
         "--max-genomes",
@@ -45,16 +40,24 @@ def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.Argum
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Force re-download of genomes even if files already exist."
-    )
-    parser.add_argument(
-        "taxon",
-        help="Taxon name (e.g., 'Homo sapiens' or 'Arabidopsis')."
+        help="Overwrite existing files with the same filenames."
     )
 
-    if return_parser:
-        return parser
-    
+    if standalone:
+        parser.add_argument(
+            "-o",
+            "--output-dir",
+            default="out",
+            help="Path to the output directory (default: /out)."
+        )
+
+
+def _get_args() -> argparse.Namespace:
+    """Gets arguments for standalone script execution."""
+    parser = argparse.ArgumentParser(
+        description="Gets FASTA and GFF files for the given taxon using the Genbank API"
+    )
+    add_args_to_parser(parser)
     return parser.parse_args()
 
 
@@ -65,7 +68,6 @@ def get_genomes_by_taxon(
         session: requests.Session,
         max_genomes: Optional[int] = None,
         force: bool = False,
-        chunk_size: int = 32 * 1024
     ) -> str:
     """
     Finds, downloads, and extracts all reference genomes for a given taxon.
@@ -88,7 +90,7 @@ def get_genomes_by_taxon(
         accession = report.get("accession", "N/A")
         organism_name = report.get("organism", {}).get("organism_name", "N/A")
         common_name = report.get("organism", {}).get("common_name", "N/A")
-        print(f" - {organism_name} | {common_name} | {accession}")
+        print(f"{organism_name} | {common_name} | {accession}")
 
     taxon_dir_name = taxon.replace(" ", "_")
     genomes_dir_path = os.path.join(output_dir, "taxons", taxon_dir_name, "genomes")
@@ -112,22 +114,17 @@ def get_genomes_by_taxon(
 
         print(f"\nDownloading genome {i}/{num_genomes}: {accession} ({organism_name})")
         download_url = f"{GENBANK_API_BASE_URL}/genome/accession/{accession}/download?include_annotation_type=GENOME_FASTA,GENOME_GFF"
-        _download_and_unzip(session, download_url, api_key, genomes_dir_path, accession, force=force, chunk_size=chunk_size)
+        _download_and_unzip(session, download_url, api_key, genomes_dir_path, accession, force=force)
     
     return genomes_dir_path
 
 
 def run_get_genomes(args: argparse.Namespace) -> int:
-    """
-    Execute get genomes logic:
-        - If args.taxon present: download and set args.input_path = downloaded dir (for pipeline).
-        - Else: error (standalone requires positional taxon; pipeline should only call this if download needed).
-    """
     if not args.taxon:
         print("ERROR: Taxon name is required to download genomes.", file=sys.stderr)
         return 1
 
-    session = _build_session(timeout=TIMEOUT, retries=RETRIES)
+    session = _build_session()
     try:
         try:
             taxon_path = get_genomes_by_taxon(
@@ -153,7 +150,7 @@ def run_get_genomes(args: argparse.Namespace) -> int:
 
 
 # Helper functions
-def _build_session(timeout: int = 30, retries: int = 3, backoff_factor: float = 0.3) -> requests.Session:
+def _build_session() -> requests.Session:
     """
     Return a requests.Session configured with retry logic.
     Retries restricted to GET
@@ -169,8 +166,8 @@ def _build_session(timeout: int = 30, retries: int = 3, backoff_factor: float = 
     allowed = frozenset(['GET'])
     try:
         retry = Retry(
-            total=retries,
-            backoff_factor=backoff_factor,
+            total=RETRIES,
+            backoff_factor=BACKOFF_FACTOR,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=allowed,
             raise_on_status=False
@@ -178,8 +175,8 @@ def _build_session(timeout: int = 30, retries: int = 3, backoff_factor: float = 
     except TypeError:
         # older urllib3 versions use method_whitelist
         retry = Retry(
-            total=retries,
-            backoff_factor=backoff_factor,
+            total=RETRIES,
+            backoff_factor=BACKOFF_FACTOR,
             status_forcelist=[429, 500, 502, 503, 504],
             method_whitelist=allowed,
             raise_on_status=False
@@ -189,7 +186,7 @@ def _build_session(timeout: int = 30, retries: int = 3, backoff_factor: float = 
     s.mount("https://", adapter)
     s.mount("http://", adapter)
 
-    s.request_timeout = timeout
+    s.request_timeout = TIMEOUT_IN_SECONDS
     return s
 
 
@@ -206,11 +203,12 @@ def _api_request(session: requests.Session, url: str, api_key: str) -> dict:
 
 
 def _download_and_unzip(
-        session: requests.Session, 
-        url: str, api_key: str | None, 
-        out_dir: str, accession: str, 
-        force: bool = False, 
-        chunk_size: int = 32 * 1024
+        session: requests.Session,
+        url: str, 
+        api_key: str | None,
+        out_dir: str,
+        accession: str,
+        force: bool = False,
     ) -> None:
     """
     Stream-download the zip at `url` into a temp file on disk, then open it with zipfile.ZipFile
@@ -233,7 +231,7 @@ def _download_and_unzip(
             tmp_fd, tmp_zip = tempfile.mkstemp(prefix="datasets_download_", suffix=".zip", dir=out_dir)
             os.close(tmp_fd)
             with open(tmp_zip, 'wb') as f:
-                for chunk in res.iter_content(chunk_size=chunk_size):
+                for chunk in res.iter_content(chunk_size=CHUNK_SIZE):
                     if chunk:
                         f.write(chunk)
             
@@ -270,15 +268,13 @@ def _download_and_unzip(
                 pass   
 
 
-def main() -> int:
+def main():
     """Standalone execution entry point."""
-    args = get_args()
     try:
-        return run_get_genomes(args)
+        return run_get_genomes(_get_args())
     except Exception as e:
         print(f"\nERROR: {e}", file=sys.stderr)
         return 1
-
 
 if __name__ == "__main__":
     sys.exit(main())

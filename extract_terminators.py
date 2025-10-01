@@ -27,29 +27,13 @@ class FileProcessingError(TerminatorExtractionError):
     pass
 
 
-def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Extract terminators for the given genomes/genus."
-    )
+def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
     parser.add_argument("input_path", help="Path to the input folder containing FASTA and GFF files.")
-    parser.add_argument(
-        "-d",
-        "--downstream-nts",
-        type=int,
-        default=50,
-        help="Number of nucleotides downstream of the CS to extract (default: 50)."
-    )
     parser.add_argument(
         "-r",
         "--raw-dna",
         action="store_true",
         help="Output raw DNA sequences instead of transcribed RNA."
-    )
-    parser.add_argument(
-        "-o",
-        "--output-dir",
-        default=os.path.join(OUT_DIR, "terminators"),
-        help="Path to the output directory (default: 'out/terminators')."
     )
     parser.add_argument(
         "--filter-consecutive-a",
@@ -70,8 +54,27 @@ def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.Argum
         help="Number of downstream nts to check for internal priming artifacts (default: 10)."
     )
 
-    if return_parser:
-        return parser
+    if standalone:
+        parser.add_argument(
+            "-o",
+            "--output-dir",
+            default=os.path.join(OUT_DIR, "terminators"),
+            help="Path to the output directory (default: 'out/terminators')."
+        )
+        parser.add_argument(
+            "-d",
+            "--downstream-nts",
+            type=int,
+            default=50,
+            help="Number of nucleotides downstream of the CS to extract (default: 50)."
+        )
+
+
+def _get_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Extract terminators for the given genomes/genus."
+    )
+    add_args_to_parser(parser)
 
     args = parser.parse_args()
     if not os.path.isdir(args.input_path):
@@ -310,23 +313,12 @@ def worker(args: tuple) -> None:
 
 
 def run_extraction(args: argparse.Namespace) -> int:
-    try:
-        file_pairs = find_files(args.input_path)
-        tasks = [(file_pair[0], file_pair[1], args) for file_pair in file_pairs]
+    file_pairs = find_files(args.input_path)
+    tasks = [(file_pair[0], file_pair[1], args) for file_pair in file_pairs]
 
-        # process each genome in parallel
-        with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
-            list(executor.map(worker, tasks))
-
-    except (GFFParsingError, FileProcessingError, OSError) as e:
-        print(f"\nERROR: {e}", file=sys.stderr)
-        return 1
-    except KeyboardInterrupt:
-        print("\nInterrupted by user.", file=sys.stderr)
-        return 1
-    except Exception as e:
-        print(f"\nAn unexpected error occurred: {e}", file=sys.stderr)
-        return 1
+    # process each genome in parallel
+    with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
+        list(executor.map(worker, tasks))
 
     print("\nTerminator extraction finished")
     return 0
@@ -334,8 +326,11 @@ def run_extraction(args: argparse.Namespace) -> int:
 
 def main() -> int:
     """Standalone execution entry point."""
-    args = get_args()
-    return run_extraction(args)
+    try:
+        return run_extraction(_get_args())
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
 
 if __name__ == "__main__":
     sys.exit(main())

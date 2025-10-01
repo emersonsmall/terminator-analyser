@@ -10,40 +10,22 @@ from plot_utils import plot_signal_distribution
 
 import pyfaidx
 
-# Region coordinates for k-mer count window
 # -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 NUE_START = -50
 NUE_END = -1
-CE_START = -10 # Loke paper uses -15, but -10 gives better results. If using -15, AAUAAA and other NUE signals dominate
+CE_START = -10 # Loke paper uses -15, but -10 gives better results. AAUAAA and other NUE signals dominate if using -15
 CE_END = 20
 
-# Plot constants
-NUE_X_MIN = -35
-NUE_X_MAX = -5
-CE_X_MIN = -10
-CE_X_MAX = 15
+PLOT_NUE_X_MIN = -35
+PLOT_NUE_X_MAX = -5
+PLOT_CE_X_MIN = -10
+PLOT_CE_X_MAX = 15
 SIGNALS_PLOT_FILENAME = "_signals_plot.png"
 
-def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Analyses the NUE and CE regions of the given terminator sequences."
-    )
+def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
     parser.add_argument(
         "input_path",
         help="Path to the terminator sequence FASTA file/s (filepath or directory path)."
-    )
-    parser.add_argument(
-        "-o", 
-        "--output-dir", 
-        default="out",
-        help="Path to the output directory (default: ./out)."
-    )
-    parser.add_argument(
-        "-d", 
-        "--downstream-nts", 
-        type=int, 
-        default=50,
-        help="Number of nucleotides downstream of the CS included in the terminators (default: 50)."
     )
     parser.add_argument(
         "-n",
@@ -74,8 +56,26 @@ def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.Argum
         help="Step size for k-mer counting (default: 1)."
     )
 
-    if return_parser:
-        return parser
+    if standalone:
+        parser.add_argument(
+            "-o", 
+            "--output-dir", 
+            default="out",
+            help="Path to the output directory (default: ./out)."
+        )
+        parser.add_argument(
+            "-d",
+            "--downstream-nts", 
+            type=int, 
+            default=50,
+            help="Number of nucleotides downstream of the CS included in the terminators (default: 50)."
+        )
+
+def _get_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Analyses the NUE and CE regions of the given terminator sequences."
+    )
+    add_args_to_parser(parser)
 
     args = parser.parse_args()
     if not os.path.exists(args.input_path):
@@ -238,8 +238,8 @@ def run_analysis(args: argparse.Namespace) -> int:
         ranked_nue_kmers, 
         nue_counts, 
         "NUE",
-        NUE_X_MIN, 
-        NUE_X_MAX,
+        PLOT_NUE_X_MIN, 
+        PLOT_NUE_X_MAX,
         nue_plot_path
     )
 
@@ -247,8 +247,8 @@ def run_analysis(args: argparse.Namespace) -> int:
         ranked_ce_kmers, 
         ce_counts, 
         "CE", 
-        CE_X_MIN, 
-        CE_X_MAX,
+        PLOT_CE_X_MIN, 
+        PLOT_CE_X_MAX,
         ce_plot_path
     )
 
@@ -258,8 +258,11 @@ def run_analysis(args: argparse.Namespace) -> int:
 
 def main():
     """Standalone execution entry point."""
-    args = get_args()
-    return run_analysis(args)
+    try:
+        return run_analysis(_get_args())
+    except Exception as e:
+        print(f"\nERROR: {e}", file=sys.stderr)
+        return 1
 
 if __name__ == "__main__":
     sys.exit(main())
