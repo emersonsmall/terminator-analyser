@@ -43,8 +43,8 @@ def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True)
         parser.add_argument(
             "-o",
             "--output-dir",
-            default=os.path.join("out", "taxons"),
-            help="Path to the output directory (default: ./out/genomes)."
+            default="out",
+            help="Path to the output directory (default: ./out)."
         )
 
 
@@ -67,10 +67,10 @@ def get_genomes_by_taxon(
     """
     Downloads and extracts all reference genomes (FASTA and GFF files) for a given taxon.
     """
+    session = _build_session()
     try:
         taxon = taxon.strip().lower()
         report_url = f"{GENBANK_API_BASE_URL}/genome/taxon/{requests.utils.quote(taxon)}/dataset_report?filters.reference_only=true"
-        session = _build_session()
         report_res = _api_request(session, report_url, api_key)
         reports = report_res.get("reports")
         if not reports:
@@ -89,14 +89,11 @@ def get_genomes_by_taxon(
             print(f"{organism_name} | {common_name} | {accession}")
 
         taxon_dir_name = taxon.replace(" ", "_")
-        genomes_dir_path = os.path.join(output_dir, taxon_dir_name, "genomes")
+        genomes_dir_path = os.path.join(output_dir, "taxons", taxon_dir_name, "genomes")
         os.makedirs(genomes_dir_path, exist_ok=True)
 
         for i, report in enumerate(reports, start=1):
             accession = report.get("accession")
-            if not accession:
-                print(f"Skipping genome with missing accession: {report}")
-                continue
 
             organism_name = report.get("organism").get("organism_name", "N/A")
 
@@ -105,7 +102,7 @@ def get_genomes_by_taxon(
             has_gff = any(f.startswith(accession) and f.endswith((".gff", ".gff3")) for f in existing_files)
 
             if has_fasta and has_gff:
-                print(f"\n{accession} genome already downloaded. Skipping.")
+                print(f"\n{accession} already downloaded. Skipping.")
                 continue
 
             print(f"\nDownloading genome {i}/{num_genomes}: {accession} ({organism_name})")

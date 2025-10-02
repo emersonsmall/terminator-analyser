@@ -44,7 +44,6 @@ def main() -> int:
             return run_analysis(args)
 
         elif args.command == "full":
-            # Step 1: Get Genomes
             print("\nGETTING GENOMES")
             exit_code = run_get_genomes(args)
             if exit_code != 0:
@@ -56,7 +55,6 @@ def main() -> int:
                 print("\nERROR: Genome retrieval did not produce a valid genomes directory.", file=sys.stderr)
                 return 1
 
-            # Step 2: Extract Terminators
             print("\nEXTRACTING TERMINATORS")
             extract_args = argparse.Namespace(**vars(args)) # copy
             extract_args.input_path = genomes_out_dir
@@ -68,7 +66,6 @@ def main() -> int:
                 print("\nERROR: Terminator extraction failed.", file=sys.stderr)
                 return exit_code
 
-            # Step 3: Analyse Terminators
             print("\nANALYSING TERMINATORS")
             analyse_args = argparse.Namespace(**vars(args))
             analyse_args.input_path = extract_args.output_dir

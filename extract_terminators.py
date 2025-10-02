@@ -36,6 +36,13 @@ def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True)
         default=10,
         help="Number of downstream nts to check for internal priming artifacts (default: 10)."
     )
+    parser.add_argument(
+        "-d",
+        "--downstream-nts",
+        type=int,
+        default=50,
+        help="Number of nucleotides downstream of the CS to extract (default: 50)."
+    )
 
     if standalone:
         parser.add_argument(
@@ -47,13 +54,6 @@ def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True)
             "--output-dir",
             default=os.path.join("out", "terminators"),
             help="Path to the output directory (default: './out/terminators')."
-        )
-        parser.add_argument(
-            "-d",
-            "--downstream-nts",
-            type=int,
-            default=50,
-            help="Number of nucleotides downstream of the CS to extract (default: 50)."
         )
 
 
@@ -93,11 +93,9 @@ def is_internal_priming_artifact(sequence: str, consecutive_a: int = 6, total_a:
     
     region_to_check = sequence[:window_size].upper()
 
-    # check for consecutive A's
     if consecutive_a > 0 and 'A' * consecutive_a in region_to_check:
         return True
     
-    # check for total A's in window
     if total_a > 0 and region_to_check.count('A') >= total_a:
         return True
     

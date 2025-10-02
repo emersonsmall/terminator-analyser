@@ -60,8 +60,8 @@ def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True)
         parser.add_argument(
             "-o", 
             "--output-dir", 
-            default="out",
-            help="Path to the output directory (default: ./out)."
+            default=os.path.join("out", "plots"),
+            help="Path to the output directory (default: ./out/plots)."
         )
         parser.add_argument(
             "-d",
@@ -177,14 +177,14 @@ def rank_kmers_by_delta(kmer_counts: dict, top_n: int) -> list:
 
 
 def print_report(region_name: str, kmers: list, kmer_size: int):
-    print("\n" + "=" * 40)
+    print("\n" + "=" * 50)
     print(f"Top {len(kmers)} K-mers for {region_name}")
-    print("=" * 40)
-    print(f"{'Rank':<5} | {'K-mer':<{kmer_size + 2}} | {'Delta':>15} | {'Peak Count':>12} | {'Peak Pos':>15}")
-    print("-" * 40)
+    print("=" * 50)
+    print(f"{'Rank':<5} | {'K-mer':<{kmer_size + 2}} | {'Delta':>8} | {'Peak Count':>10} | {'Peak Pos':>8}")
+    print("-" * 50)
     for i, item in enumerate(kmers):
         rank = i + 1
-        print(f"{rank:<5} | {item['kmer']:<{kmer_size + 2}} | {item['delta']:>15.1f} | {item['peak_count']:>12,} | {item['peak_pos']:>15}")
+        print(f"{rank:<5} | {item['kmer']:<{kmer_size + 2}} | {item['delta']:>8.1f} | {item['peak_count']:>10,} | {item['peak_pos']:>8}")
 
 
 def run_analysis(args: argparse.Namespace) -> int:
