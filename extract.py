@@ -101,8 +101,166 @@ def is_internal_priming_artifact(sequence: str, consecutive_a: int = 6, total_a:
     
     return False
 
-# TODO: break into smaller functions
-def extract_terminators(fasta_fpath: str, gff_fpath: str, args: argparse.Namespace) -> None:
+
+def create_gff_db(gff_fpath: str, db_fpath: str) -> gffutils.FeatureDB:
+    """
+    Creates a gffutils FeatureDB from the given GFF file if it does not already exist.
+
+    Args:
+        gff_fpath (str): Filepath to the input GFF file.
+        db_fpath (str): Filepath to the output database file.
+
+    Returns:
+        gffutils.FeatureDB: The created FeatureDB object.
+    """
+    assert os.path.isfile(gff_fpath), f"GFF file '{gff_fpath}' does not exist."
+
+    if not os.path.isfile(db_fpath):
+        print(f"Creating GFF database at '{db_fpath}'")
+        gffutils.create_db(
+            gff_fpath,
+            dbfn=db_fpath,
+            keep_order=True,
+            merge_strategy="create_unique",
+            sort_attribute_values=True,
+        )
+    else:
+        print(f"Using existing GFF database at '{db_fpath}'")
+    
+    return gffutils.FeatureDB(db_fpath)
+
+
+def extract_terminator(
+    tscript: gffutils.Feature, 
+    fasta: pyfaidx.Fasta,
+    cds_features: list,
+    exon_features: list,
+    downstream_nts: int,
+) -> str | None:
+    """
+    Extracts the terminator sequence (3'UTR + downstream region) for a given transcript feature.
+    Handles strand and reverse complementing as needed.
+    """
+    # All coordinates 1-based until modified in slice operations
+    # Python slices are 0-based, end-exclusive -> subtract 1 only for start coords
+    utr_parts = []
+
+    if tscript.strand == "+":
+        cds_end = cds_features[-1].end
+
+        # Get all exons after the CDS end
+        for exon in exon_features:
+            if exon.end > cds_end:
+                utr_start = max(exon.start, cds_end + 1) # One exon can contain CDS and 3'UTR content
+                utr_end = exon.end
+                utr_parts.append(fasta[tscript.chrom][utr_start - 1 : utr_end].seq)
+
+        downstream_start = tscript.end + 1
+        downstream_end = tscript.end + downstream_nts
+
+    elif tscript.strand == "-":
+        cds_start = cds_features[0].start
+
+        # Get all exons before the CDS start
+        for exon in exon_features:
+            if exon.start < cds_start:
+                utr_start = exon.start
+                utr_end = min(exon.end, cds_start - 1)
+                utr_parts.append(fasta[tscript.chrom][utr_start - 1 : utr_end].seq)
+        
+        downstream_start = max(1, tscript.start - downstream_nts)
+        downstream_end = tscript.start - 1
+
+    else:
+        print(f"WARNING: unknown strand '{tscript.strand}' for feature '{tscript.id}'", file=sys.stderr)
+        return None
+    
+    if not utr_parts:
+        return None
+
+    full_utr = ''.join(utr_parts)
+    downstream_seq = ""
+    if downstream_start <= downstream_end:
+        downstream_seq = fasta[tscript.chrom][downstream_start - 1 : downstream_end].seq
+
+    # Assemble final sequence
+    if tscript.strand == "+":
+        term_seq = full_utr + downstream_seq # 5' to 3'
+    else:
+        term_seq = downstream_seq + full_utr
+        term_seq = pyfaidx.Sequence(seq=term_seq).reverse.complement.seq
+    
+    return term_seq
+
+
+def filter_sequence(term_seq: str, args: argparse.Namespace) -> bool:
+    """
+    Applies filters to the terminator sequence.
+
+    Returns:
+        bool: True if the sequence passes the filters, False otherwise.
+    """
+    if args.raw_dna:
+        return True
+
+    final_downstream_seq = term_seq[-args.downstream_nts:]
+    if len(final_downstream_seq) < args.filter_window_size:
+        return False
+
+    if is_internal_priming_artifact(
+        final_downstream_seq, 
+        args.filter_consecutive_a, 
+        args.filter_window_a, 
+        args.filter_window_size
+    ):
+        return False
+
+    return True
+
+
+def format_fasta_record(tscript: gffutils.Feature, term_seq: str, raw_dna: bool) -> str:
+    """
+    Formats the given terminator sequence into a FASTA record header.
+
+    Returns:
+        str: The formatted FASTA record.
+    """
+    display_id = tscript.id
+    if "orig_protein_id" in tscript.attributes:
+        raw_id = tscript.attributes["orig_protein_id"][0]
+        display_id = raw_id.split('|')[-1]
+    
+    header = f">{display_id} | {tscript.chrom}:{tscript.start}-{tscript.end}({tscript.strand})"
+
+    term_seq = term_seq.upper()
+    if not raw_dna:
+        term_seq = term_seq.replace('T', 'U')
+    wrapped_seq = textwrap.fill(term_seq, width=80)
+
+    return f"{header}\n{wrapped_seq}\n"
+
+
+def process_transcript(tscript: gffutils.Feature, db: gffutils.FeatureDB, fasta: pyfaidx.Fasta, args: argparse.Namespace) -> str | None:
+    """Processes a single transcript feature to extract and format its terminator sequence."""
+    try:
+        cds_features = list(db.children(tscript, featuretype="CDS", order_by="start"))
+        exon_features = list(db.children(tscript, featuretype="exon", order_by="start"))
+        if not cds_features or not exon_features:
+            return None
+        
+        term_seq = extract_terminator(tscript, fasta, cds_features, exon_features, args.downstream_nts)
+
+        if not term_seq or not filter_sequence(term_seq, args):
+            return None
+        
+        return format_fasta_record(tscript, term_seq, args.raw_dna)
+
+    except Exception as e:
+        print(f"WARNING: could not process feature '{tscript.id}': {e}", file=sys.stderr)
+        return None
+
+
+def extract_all_terminators(fasta_fpath: str, gff_fpath: str, args: argparse.Namespace) -> None:
     """
     Extracts terminator sequences (3'UTR + downstream region) from the given fasta and gff files.
 
@@ -114,131 +272,33 @@ def extract_terminators(fasta_fpath: str, gff_fpath: str, args: argparse.Namespa
     assert os.path.isfile(fasta_fpath), f"Fasta file '{fasta_fpath}' does not exist."
     assert os.path.isfile(gff_fpath), f"GFF file '{gff_fpath}' does not exist."
 
-    terminators_dir = args.output_dir
-    db_dir = os.path.join(os.path.dirname(terminators_dir), "gff_dbs")
-    os.makedirs(terminators_dir, exist_ok=True)
+    fname = os.path.basename(fasta_fpath).split('.')[0]
+    print(f"Processing genome '{fname}'")
+
+    db_dir = os.path.join("out", "gff_dbs") # Allows reuse of DBs between different taxons
+    os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(db_dir, exist_ok=True)
 
-    fname = os.path.basename(fasta_fpath).split('.')[0]
     db_fpath = os.path.join(db_dir, f"{fname}.db")
-    terminators_fpath = os.path.join(terminators_dir, f"{fname}_terminators.fa")
+    terminators_fpath = os.path.join(args.output_dir, f"{fname}_terminators.fa")
 
-    if not os.path.isfile(db_fpath):
-        print(f"Creating GFF database for '{fname}'")
-        gffutils.create_db(
-            gff_fpath,
-            dbfn=db_fpath,
-            keep_order=True,
-            merge_strategy="create_unique",
-            sort_attribute_values=True,
-        )
-    else:
-        print(f"Using existing GFF database for '{fname}': '{db_fpath}'")
-    
     fasta = pyfaidx.Fasta(fasta_fpath)
-    db = gffutils.FeatureDB(db_fpath)
+    db = create_gff_db(gff_fpath, db_fpath)
     output_records = []
     skipped_count = 0
 
-    # All coordinates 1-based until modified in slice operations
-    # Python slices are 0-based, end-exclusive. -1 only for start coords
     for tscript in db.features_of_type("mRNA", order_by="start"):
-        try:
-            cds_features = list(db.children(tscript, featuretype="CDS", order_by="start"))
-            if not cds_features:
-                skipped_count += 1
-                continue
-            
-            exon_features = list(db.children(tscript, featuretype="exon", order_by="start"))
-            if not exon_features:
-                skipped_count += 1
-                continue
-
-            term_seq = ""
-            utr_parts = []
-
-            if tscript.strand == "+":
-                cds_end = cds_features[-1].end
-
-                # Get all exons after the CDS end
-                for exon in exon_features:
-                    if exon.end > cds_end:
-                        utr_start = max(exon.start, cds_end + 1) # One exon can contain CDS and 3'UTR content
-                        utr_end = exon.end
-                        utr_parts.append(fasta[tscript.chrom][utr_start - 1 : utr_end].seq)
-
-                downstream_start = tscript.end + 1
-                downstream_end = tscript.end + args.downstream_nts
-
-            elif tscript.strand == "-":
-                cds_start = cds_features[0].start
-
-                # Get all exons before the CDS start
-                for exon in exon_features:
-                    if exon.start < cds_start:
-                        utr_start = exon.start
-                        utr_end = min(exon.end, cds_start - 1)
-                        utr_parts.append(fasta[tscript.chrom][utr_start - 1 : utr_end].seq)
-                
-                downstream_start = max(1, tscript.start - args.downstream_nts)
-                downstream_end = tscript.start - 1
-
-            else:
-                print(f"WARNING: unknown strand '{tscript.strand}' for feature '{tscript.id}' in '{fname}'", file=sys.stderr)
-                skipped_count += 1
-                continue
-            
-            if not utr_parts:
-                skipped_count += 1
-                continue
-
-            full_utr = ''.join(utr_parts)
-
-            downstream_seq = ""
-            if downstream_start <= downstream_end:
-                downstream_seq = fasta[tscript.chrom][downstream_start - 1 : downstream_end].seq
-
-            if tscript.strand == "+":
-                term_seq = full_utr + downstream_seq # 5' to 3'
-            else:
-                term_seq = downstream_seq + full_utr
-                term_seq = pyfaidx.Sequence(seq=term_seq).reverse.complement.seq
-
-            if not args.raw_dna:
-                final_downstream_seq = term_seq[-args.downstream_nts:]
-                if len(final_downstream_seq) < args.filter_window_size:
-                    skipped_count += 1
-                    continue
-            
-                if is_internal_priming_artifact(final_downstream_seq, args.filter_consecutive_a, args.filter_window_a, args.filter_window_size):
-                    skipped_count += 1
-                    continue
-            
-            if term_seq:
-                display_id = tscript.id
-                if "orig_protein_id" in tscript.attributes:
-                    raw_id = tscript.attributes["orig_protein_id"][0]
-                    display_id = raw_id.split('|')[-1]
-                header = f">{display_id} | {tscript.chrom}:{tscript.start}-{tscript.end}({tscript.strand})"
-
-                term_seq = term_seq.upper()
-                if not args.raw_dna:
-                    term_seq = term_seq.replace('T', 'U')
-                
-                wrapped_seq = textwrap.fill(term_seq, width=80)
-                output_records.append(f"{header}\n{wrapped_seq}\n")
-            else:
-                skipped_count += 1
-                continue
-
-        except Exception as e:
-            print(f"WARNING: could not process feature '{tscript.id}' in '{fname}': {e}", file=sys.stderr)
-            continue
+        record = process_transcript(tscript, db, fasta, args)
+        if record:
+            output_records.append(record)
+        else:
+            skipped_count += 1
         
     with open(terminators_fpath, 'w') as out_f:
         out_f.writelines(output_records)
     
-    print(f"Extracted {len(output_records)} terminator sequences from '{fname}'\nskipped {skipped_count} transcripts")
+    print(f"Extracted {len(output_records)} terminator sequences to '{terminators_fpath}'")
+    print(f"skipped {skipped_count} transcripts")
 
 
 def find_files(dir: str) -> list[tuple[str, str]]:
@@ -288,13 +348,11 @@ def _worker(args: tuple) -> None:
         args (tuple): A tuple containing (fasta_fpath, gff_fpath, cli_args).
     """
     fasta_fpath, gff_fpath, cli_args = args
-    fname = os.path.basename(fasta_fpath).split('.')[0]
-
-    print(f"Processing genome '{fname}'")
-    extract_terminators(fasta_fpath, gff_fpath, cli_args)
+    extract_all_terminators(fasta_fpath, gff_fpath, cli_args)
 
 def run_extraction(args: argparse.Namespace) -> int:
     try:
+        # find all file pairs in the input directory
         file_pairs = find_files(args.input_path)
         tasks = [(file_pair[0], file_pair[1], args) for file_pair in file_pairs]
 

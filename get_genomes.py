@@ -99,13 +99,13 @@ def get_genomes_by_taxon(
             has_fasta = any(f.startswith(accession) and f.endswith((".fna", ".fa", ".fasta")) for f in existing_files)
             has_gff = any(f.startswith(accession) and f.endswith((".gff", ".gff3")) for f in existing_files)
 
-            if has_fasta and has_gff:
+            if has_fasta and has_gff and not force:
                 print(f"\n{accession} already downloaded. Skipping.")
                 continue
 
             print(f"\nDownloading genome {i}/{num_genomes}: {accession} ({organism_name})")
             download_url = f"{GENBANK_API_BASE_URL}/genome/accession/{accession}/download?include_annotation_type=GENOME_FASTA,GENOME_GFF"
-            _download_and_unzip(session, download_url, api_key, genomes_dir_path, accession, force)
+            _download_and_unzip(session, download_url, api_key, genomes_dir_path, accession)
         
         return genomes_dir_path
     
@@ -171,8 +171,7 @@ def _download_and_unzip(
         url: str,
         api_key: str | None,
         out_dir: str,
-        accession: str,
-        force: bool = False,
+        accession: str
     ) -> None:
     """
     Stream-download the zip at `url` into a temp file on disk, then open it with zipfile.ZipFile
@@ -213,12 +212,8 @@ def _download_and_unzip(
                     else:
                         continue
 
-                    out_path = os.path.join(out_dir, out_fname)
-                    if os.path.exists(out_path) and not force:
-                        print(f"File {out_fname} already exists. Skipping.")
-                        continue
-                        
                     # extract member -> temp file then atomic replace
+                    out_path = os.path.join(out_dir, out_fname)
                     with z.open(member) as src:
                         with tempfile.NamedTemporaryFile(delete=False, dir=out_dir) as tmpf:
                             shutil.copyfileobj(src, tmpf)
