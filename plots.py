@@ -54,7 +54,7 @@ def plot_signal_distribution(ranked_kmers: list, counts_data: dict, region: str,
     ax.legend(
         loc='upper center',
         bbox_to_anchor=(0.5, -0.15),
-        ncol=5
+        ncols=5
     )
 
     ax.set_xlim(x_min, x_max)

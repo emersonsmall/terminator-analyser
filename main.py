@@ -2,9 +2,9 @@ import argparse
 import sys
 import os
 
-from get_genomes import run_get_genomes, add_args_to_parser as add_get_genomes_args
-from extract_terminators import run_extraction, add_args_to_parser as add_extract_args
-from analyse_terminators import run_analysis, add_args_to_parser as add_analyse_args
+from get_genomes import run_get_genomes, add_args_to_parser as add_get_args
+from extract import run_extraction, add_args_to_parser as add_extract_args
+from analyse import run_analysis, add_args_to_parser as add_analyse_args
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -12,8 +12,8 @@ def main() -> int:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    get_parser = subparsers.add_parser("get", help="Get all reference genomes for a given taxon.")
-    add_get_genomes_args(get_parser, standalone=True)
+    get_parser = subparsers.add_parser("get", help="Get all reference genomes (FASTA and GFF files) for a given taxon.")
+    add_get_args(get_parser, standalone=True)
 
     extract_parser = subparsers.add_parser("extract", help="Extract terminator sequences from FASTA and GFF files.")
     add_extract_args(extract_parser, standalone=True)
@@ -27,7 +27,7 @@ def main() -> int:
         help="Path to the output directory (default: ./out)."
     )
     # Add unique args from all steps
-    add_get_genomes_args(full_parser, standalone=False)
+    add_get_args(full_parser, standalone=False)
     add_extract_args(full_parser, standalone=False)
     add_analyse_args(full_parser, standalone=False)
 

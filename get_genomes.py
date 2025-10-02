@@ -15,7 +15,6 @@ TIMEOUT_IN_SECONDS = 30
 CHUNK_SIZE = 32 * 1024 # 32KB
 BACKOFF_FACTOR = 0.3
 
-
 def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
     """Adds genome retrieval arguments to the given parser."""
     parser.add_argument(
@@ -46,7 +45,6 @@ def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True)
             default="out",
             help="Path to the output directory (default: ./out)."
         )
-
 
 def _get_args() -> argparse.Namespace:
     """Gets arguments for standalone script execution."""
@@ -113,25 +111,6 @@ def get_genomes_by_taxon(
     
     finally:
         session.close()
-
-
-def run_get_genomes(args: argparse.Namespace) -> int:
-    try:
-        taxon_path = get_genomes_by_taxon(
-            args.taxon,
-            args.api_key,
-            args.output_dir,
-            args.max_genomes,
-            args.force,
-        )
-
-        args.input_path = taxon_path
-        print(f"\nDownloaded genomes saved to: {taxon_path}")
-        return 0
-    except Exception as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        return 1
-    
 
 
 # Helper functions
@@ -253,13 +232,26 @@ def _download_and_unzip(
                 pass   
 
 
+def run_get_genomes(args: argparse.Namespace) -> int:
+    try:
+        taxon_path = get_genomes_by_taxon(
+            args.taxon,
+            args.api_key,
+            args.output_dir,
+            args.max_genomes,
+            args.force,
+        )
+
+        args.input_path = taxon_path
+        print(f"\nDownloaded genomes saved to: {taxon_path}")
+        return 0
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
 def main():
     """Standalone execution entry point."""
-    try:
-        return run_get_genomes(_get_args())
-    except Exception as e:
-        print(f"\nERROR: {e}", file=sys.stderr)
-        return 1
+    return run_get_genomes(_get_args())
 
 if __name__ == "__main__":
     sys.exit(main())
