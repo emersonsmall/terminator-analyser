@@ -4,12 +4,12 @@ import concurrent.futures
 import argparse
 import textwrap
 from collections import defaultdict
-
-# External libraries
 import pyfaidx  # https://anaconda.org/bioconda/pyfaidx
 import gffutils # https://anaconda.org/bioconda/gffutils
 
 # UTR refers to 3'UTR unless otherwise specified
+
+TERMINATOR_FILE_SUFFIX = "_terminators.fa"
 
 
 def main() -> int:
@@ -264,7 +264,7 @@ def _extract_all_terminators(fasta_fpath: str, gff_fpath: str, args: argparse.Na
     os.makedirs(db_dir, exist_ok=True)
 
     db_fpath = os.path.join(db_dir, f"{fname}.db")
-    terminators_fpath = os.path.join(args.output_dir, f"{fname}_terminators.fa")
+    terminators_fpath = os.path.join(args.output_dir, f"{fname}{TERMINATOR_FILE_SUFFIX}")
 
     fasta = pyfaidx.Fasta(fasta_fpath)
     db = _create_gff_db(gff_fpath, db_fpath)

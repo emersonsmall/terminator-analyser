@@ -5,12 +5,13 @@ import glob
 from collections import defaultdict
 import heapq
 import statistics
-
+from extract import TERMINATOR_FILE_SUFFIX
 from plots import plot_signal_distribution
-
 import pyfaidx
 
-# -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
+# Coordinates: -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
+
+# Analysis window coordinates
 NUE_START = -50
 NUE_END = -1
 CE_START = -10 # Loke paper uses -15, but -10 gives better results. AAUAAA and other NUE signals dominate if using -15
@@ -35,7 +36,7 @@ def run_analysis(args: argparse.Namespace) -> int:
         # Find all fasta files
         fasta_files = []
         if os.path.isdir(args.input_path):
-            fasta_files = glob.glob(os.path.join(args.input_path, "*_terminators.fa"))
+            fasta_files = glob.glob(os.path.join(args.input_path, f"*{TERMINATOR_FILE_SUFFIX}"))
             print(f"Found {len(fasta_files)} FASTA files")
         elif os.path.isfile(args.input_path):
             fasta_files = [args.input_path]

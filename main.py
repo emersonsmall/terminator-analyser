@@ -6,6 +6,7 @@ from get_genomes import run_get_genomes, add_args_to_parser as add_get_args
 from extract import run_extraction, add_args_to_parser as add_extract_args
 from analyse import run_analysis, add_args_to_parser as add_analyse_args
 
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Terminator Analysis Pipeline"
@@ -82,6 +83,7 @@ def main() -> int:
     except Exception as e:
         print(f"\nERROR: {e}", file=sys.stderr)
         return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

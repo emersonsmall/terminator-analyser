@@ -3,9 +3,11 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+
 CS_POSITION = 1
 LINESTYLES = ['-', '--', '-.', ':']
 MARKERS = ['o', 's', '^', 'D', 'v', 'P', '*', 'X']
+
 
 def plot_signal_distribution(ranked_kmers: list, counts_data: dict, region: str, x_min: int, x_max: int, out_file: str) -> None:
     """
