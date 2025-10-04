@@ -9,26 +9,30 @@ from textwrap import fill
 import re
 
 
-def get_args(return_parser: bool = False) -> argparse.Namespace | argparse.ArgumentParser:
+def main():
+    return _run_comparison(_get_args())
+    
+if __name__ == "__main__":
+    sys.exit(main())
+
+
+def _get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compares two FASTA files record by record based on their IDs.",
-        add_help=False
     )
     parser.add_argument("reference_fasta", help="Path to the reference FASTA file.")
     parser.add_argument("query_fasta", help="Path to the query FASTA file.")
-
-    if return_parser:
-        return parser
 
     args = parser.parse_args()
     if not os.path.isfile(args.reference_fasta):
         parser.error(f"Reference FASTA file '{args.reference_fasta}' does not exist.")
     if not os.path.isfile(args.query_fasta):
         parser.error(f"Query FASTA file '{args.query_fasta}' does not exist.")
+    
     return args
 
 
-def parse_fasta(fasta_fpath, is_query) -> dict[str, str]:
+def _parse_fasta(fasta_fpath, is_query) -> dict[str, str]:
     """
     Parses a FASTA file and returns a dictionary mapping IDs to sequences.
     - Key: Record ID (e.g., 'AT5G56260.2')
@@ -57,13 +61,13 @@ def parse_fasta(fasta_fpath, is_query) -> dict[str, str]:
     return data
 
 
-def run_comparison(args: argparse.Namespace) -> int:
+def _run_comparison(args: argparse.Namespace) -> int:
     print(f"Parsing reference FASTA")
-    reference_records = parse_fasta(args.reference_fasta, False)
+    reference_records = _parse_fasta(args.reference_fasta, False)
     print(f"Found {len(reference_records)} records in reference FASTA")
 
     print(f"Parsing query FASTA")
-    query_records = parse_fasta(args.query_fasta, True)
+    query_records = _parse_fasta(args.query_fasta, True)
     print(f"Found {len(query_records)} records in query FASTA")
 
     reference_ids = set(reference_records.keys())
@@ -114,14 +118,4 @@ def run_comparison(args: argparse.Namespace) -> int:
         if num_missing_from_q > 20:
             print(f" ... and {num_missing_from_q - 20} more records.")
     
-    print("\nComparison finished.")
     return 0
-
-
-def main():
-    """Standalone execution entry point."""
-    args = get_args()
-    return run_comparison(args)
-    
-if __name__ == "__main__":
-    sys.exit(main())

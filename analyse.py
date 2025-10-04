@@ -22,6 +22,86 @@ PLOT_CE_X_MIN = -10
 PLOT_CE_X_MAX = 15
 SIGNALS_PLOT_FILENAME = "_signals_plot.png"
 
+
+def main():
+    return run_analysis(_get_args())
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+
+def run_analysis(args: argparse.Namespace) -> int:
+    try:
+        # Find all fasta files
+        fasta_files = []
+        if os.path.isdir(args.input_path):
+            fasta_files = glob.glob(os.path.join(args.input_path, "*_terminators.fa"))
+            print(f"Found {len(fasta_files)} FASTA files")
+        elif os.path.isfile(args.input_path):
+            fasta_files = [args.input_path]
+        
+        if not fasta_files:
+            print(f"ERROR: No valid FASTA file/s found at path '{args.input_path}'", file=sys.stderr)
+            return 1
+        
+        terminators = []
+        skipped = 0
+        num_terminators = 0
+
+        for file in fasta_files:
+            fa_records = pyfaidx.Fasta(file, as_raw=True)
+            for record in fa_records:
+                num_terminators += 1
+
+                seq = str(record).upper()
+                total_len = len(seq)
+                utr_len = total_len - args.downstream_nts
+
+                if utr_len < args.min_3utr_length:
+                    skipped += 1
+                    continue
+                
+                terminators.append(seq)
+        
+        nue_counts = get_kmer_counts(terminators, NUE_START, NUE_END, args.kmer_size, args.downstream_nts, args.step_size)
+        ce_counts = get_kmer_counts(terminators, CE_START, CE_END, args.kmer_size, args.downstream_nts, args.step_size)
+
+        ranked_nue_kmers = rank_kmers_by_delta(nue_counts, args.top_n)
+        ranked_ce_kmers = rank_kmers_by_delta(ce_counts, args.top_n)
+
+        print(f"\n{skipped} of {num_terminators} ({(skipped/num_terminators * 100):.2f}%) terminator sequences skipped due to insufficient 3'UTR length")
+        _print_report("CE", ranked_ce_kmers, args.kmer_size)
+        _print_report("NUE", ranked_nue_kmers, args.kmer_size)
+
+        os.makedirs(args.output_dir, exist_ok=True)
+
+        nue_plot_path = os.path.join(args.output_dir, "NUE" + SIGNALS_PLOT_FILENAME)
+        ce_plot_path = os.path.join(args.output_dir, "CE" + SIGNALS_PLOT_FILENAME)
+
+        plot_signal_distribution(
+            ranked_nue_kmers, 
+            nue_counts, 
+            "NUE",
+            PLOT_NUE_X_MIN, 
+            PLOT_NUE_X_MAX,
+            nue_plot_path
+        )
+
+        plot_signal_distribution(
+            ranked_ce_kmers, 
+            ce_counts, 
+            "CE",
+            PLOT_CE_X_MIN, 
+            PLOT_CE_X_MAX,
+            ce_plot_path
+        )
+
+        return 0
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+
 def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
     parser.add_argument(
         "-n",
@@ -176,6 +256,8 @@ def rank_kmers_by_delta(kmer_counts: dict, top_n: int) -> list:
     return top_items
 
 
+# --- HELPER FUNCTIONS ---
+
 def _print_report(region_name: str, kmers: list, kmer_size: int):
     print("\n" + "=" * 50)
     print(f"Top {len(kmers)} K-mers for {region_name}")
@@ -185,83 +267,3 @@ def _print_report(region_name: str, kmers: list, kmer_size: int):
     for i, item in enumerate(kmers):
         rank = i + 1
         print(f"{rank:<5} | {item['kmer']:<{kmer_size + 2}} | {item['delta']:>8.1f} | {item['peak_count']:>10,} | {item['peak_pos']:>8}")
-
-
-def run_analysis(args: argparse.Namespace) -> int:
-    try:
-        # Find all fasta files
-        fasta_files = []
-        if os.path.isdir(args.input_path):
-            fasta_files = glob.glob(os.path.join(args.input_path, "*_terminators.fa"))
-            print(f"Found {len(fasta_files)} FASTA files")
-        elif os.path.isfile(args.input_path):
-            fasta_files = [args.input_path]
-        
-        if not fasta_files:
-            print(f"ERROR: No valid FASTA file/s found at path '{args.input_path}'", file=sys.stderr)
-            return 1
-        
-        terminators = []
-        skipped = 0
-        num_terminators = 0
-
-        for file in fasta_files:
-            fa_records = pyfaidx.Fasta(file, as_raw=True)
-            for record in fa_records:
-                num_terminators += 1
-
-                seq = str(record).upper()
-                total_len = len(seq)
-                utr_len = total_len - args.downstream_nts
-
-                if utr_len < args.min_3utr_length:
-                    skipped += 1
-                    continue
-                
-                terminators.append(seq)
-        
-        nue_counts = get_kmer_counts(terminators, NUE_START, NUE_END, args.kmer_size, args.downstream_nts, args.step_size)
-        ce_counts = get_kmer_counts(terminators, CE_START, CE_END, args.kmer_size, args.downstream_nts, args.step_size)
-
-        ranked_nue_kmers = rank_kmers_by_delta(nue_counts, args.top_n)
-        ranked_ce_kmers = rank_kmers_by_delta(ce_counts, args.top_n)
-
-        print(f"\n{skipped} of {num_terminators} ({(skipped/num_terminators * 100):.2f}%) terminator sequences skipped due to insufficient 3'UTR length")
-        _print_report("CE", ranked_ce_kmers, args.kmer_size)
-        _print_report("NUE", ranked_nue_kmers, args.kmer_size)
-
-        os.makedirs(args.output_dir, exist_ok=True)
-
-        nue_plot_path = os.path.join(args.output_dir, "NUE" + SIGNALS_PLOT_FILENAME)
-        ce_plot_path = os.path.join(args.output_dir, "CE" + SIGNALS_PLOT_FILENAME)
-
-        plot_signal_distribution(
-            ranked_nue_kmers, 
-            nue_counts, 
-            "NUE",
-            PLOT_NUE_X_MIN, 
-            PLOT_NUE_X_MAX,
-            nue_plot_path
-        )
-
-        plot_signal_distribution(
-            ranked_ce_kmers, 
-            ce_counts, 
-            "CE",
-            PLOT_CE_X_MIN, 
-            PLOT_CE_X_MAX,
-            ce_plot_path
-        )
-
-        print("\nAnalysis finished")
-        return 0
-    except Exception as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        return 1
-
-def main():
-    """Standalone execution entry point."""
-    return run_analysis(_get_args())
-
-if __name__ == "__main__":
-    sys.exit(main())

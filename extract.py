@@ -11,6 +11,41 @@ import gffutils # https://anaconda.org/bioconda/gffutils
 
 # UTR refers to 3'UTR unless otherwise specified
 
+
+def main() -> int:
+    return run_extraction(_get_args())
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+
+def run_extraction(args: argparse.Namespace) -> int:
+    try:
+        # find all file pairs in the input directory
+        file_pairs = _find_files(args.input_path)
+        tasks = [(file_pair[0], file_pair[1], args) for file_pair in file_pairs]
+
+        # process each genome in parallel
+        with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
+            list(executor.map(_worker, tasks))
+
+        return 0
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+
+def _worker(args: tuple) -> None:
+    """
+    Extracts the terminator sequences of a single genome.
+
+    Args:
+        args (tuple): A tuple containing (fasta_fpath, gff_fpath, cli_args).
+    """
+    fasta_fpath, gff_fpath, cli_args = args
+    _extract_all_terminators(fasta_fpath, gff_fpath, cli_args)
+
+
 def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
     parser.add_argument(
         "-r",
@@ -56,7 +91,6 @@ def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True)
             help="Path to the output directory (default: './out/terminators')."
         )
 
-
 def _get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Extract terminators for the given genomes/genus."
@@ -69,7 +103,7 @@ def _get_args() -> argparse.Namespace:
     return args
 
 
-def is_internal_priming_artifact(sequence: str, consecutive_a: int = 6, total_a: int = 8, window_size: int = 10) -> bool:
+def _is_internal_priming_artifact(sequence: str, consecutive_a: int = 6, total_a: int = 8, window_size: int = 10) -> bool:
     """
     Checks if the given downstream sequence is likely to be an internal priming artifact.
     Methodology based on Beaudong et al. DOI: 10.1101/gr.10.7.1001
@@ -102,35 +136,7 @@ def is_internal_priming_artifact(sequence: str, consecutive_a: int = 6, total_a:
     return False
 
 
-def create_gff_db(gff_fpath: str, db_fpath: str) -> gffutils.FeatureDB:
-    """
-    Creates a gffutils FeatureDB from the given GFF file if it does not already exist.
-
-    Args:
-        gff_fpath (str): Filepath to the input GFF file.
-        db_fpath (str): Filepath to the output database file.
-
-    Returns:
-        gffutils.FeatureDB: The created FeatureDB object.
-    """
-    assert os.path.isfile(gff_fpath), f"GFF file '{gff_fpath}' does not exist."
-
-    if not os.path.isfile(db_fpath):
-        print(f"Creating GFF database at '{db_fpath}'")
-        gffutils.create_db(
-            gff_fpath,
-            dbfn=db_fpath,
-            keep_order=True,
-            merge_strategy="create_unique",
-            sort_attribute_values=True,
-        )
-    else:
-        print(f"Using existing GFF database at '{db_fpath}'")
-    
-    return gffutils.FeatureDB(db_fpath)
-
-
-def extract_terminator(
+def _extract_terminator(
     tscript: gffutils.Feature, 
     fasta: pyfaidx.Fasta,
     cds_features: list,
@@ -193,7 +199,7 @@ def extract_terminator(
     return term_seq
 
 
-def filter_sequence(term_seq: str, args: argparse.Namespace) -> bool:
+def _filter_sequence(term_seq: str, args: argparse.Namespace) -> bool:
     """
     Applies filters to the terminator sequence.
 
@@ -207,7 +213,7 @@ def filter_sequence(term_seq: str, args: argparse.Namespace) -> bool:
     if len(final_downstream_seq) < args.filter_window_size:
         return False
 
-    if is_internal_priming_artifact(
+    if _is_internal_priming_artifact(
         final_downstream_seq, 
         args.filter_consecutive_a, 
         args.filter_window_a, 
@@ -218,29 +224,7 @@ def filter_sequence(term_seq: str, args: argparse.Namespace) -> bool:
     return True
 
 
-def format_fasta_record(tscript: gffutils.Feature, term_seq: str, raw_dna: bool) -> str:
-    """
-    Formats the given terminator sequence into a FASTA record header.
-
-    Returns:
-        str: The formatted FASTA record.
-    """
-    display_id = tscript.id
-    if "orig_protein_id" in tscript.attributes:
-        raw_id = tscript.attributes["orig_protein_id"][0]
-        display_id = raw_id.split('|')[-1]
-    
-    header = f">{display_id} | {tscript.chrom}:{tscript.start}-{tscript.end}({tscript.strand})"
-
-    term_seq = term_seq.upper()
-    if not raw_dna:
-        term_seq = term_seq.replace('T', 'U')
-    wrapped_seq = textwrap.fill(term_seq, width=80)
-
-    return f"{header}\n{wrapped_seq}\n"
-
-
-def process_transcript(tscript: gffutils.Feature, db: gffutils.FeatureDB, fasta: pyfaidx.Fasta, args: argparse.Namespace) -> str | None:
+def _process_transcript(tscript: gffutils.Feature, db: gffutils.FeatureDB, fasta: pyfaidx.Fasta, args: argparse.Namespace) -> str | None:
     """Processes a single transcript feature to extract and format its terminator sequence."""
     try:
         cds_features = list(db.children(tscript, featuretype="CDS", order_by="start"))
@@ -248,19 +232,19 @@ def process_transcript(tscript: gffutils.Feature, db: gffutils.FeatureDB, fasta:
         if not cds_features or not exon_features:
             return None
         
-        term_seq = extract_terminator(tscript, fasta, cds_features, exon_features, args.downstream_nts)
+        term_seq = _extract_terminator(tscript, fasta, cds_features, exon_features, args.downstream_nts)
 
-        if not term_seq or not filter_sequence(term_seq, args):
+        if not term_seq or not _filter_sequence(term_seq, args):
             return None
         
-        return format_fasta_record(tscript, term_seq, args.raw_dna)
+        return _format_fasta_record(tscript, term_seq, args.raw_dna)
 
     except Exception as e:
         print(f"WARNING: could not process feature '{tscript.id}': {e}", file=sys.stderr)
         return None
 
 
-def extract_all_terminators(fasta_fpath: str, gff_fpath: str, args: argparse.Namespace) -> None:
+def _extract_all_terminators(fasta_fpath: str, gff_fpath: str, args: argparse.Namespace) -> None:
     """
     Extracts terminator sequences (3'UTR + downstream region) from the given fasta and gff files.
 
@@ -283,12 +267,12 @@ def extract_all_terminators(fasta_fpath: str, gff_fpath: str, args: argparse.Nam
     terminators_fpath = os.path.join(args.output_dir, f"{fname}_terminators.fa")
 
     fasta = pyfaidx.Fasta(fasta_fpath)
-    db = create_gff_db(gff_fpath, db_fpath)
+    db = _create_gff_db(gff_fpath, db_fpath)
     output_records = []
     skipped_count = 0
 
     for tscript in db.features_of_type("mRNA", order_by="start"):
-        record = process_transcript(tscript, db, fasta, args)
+        record = _process_transcript(tscript, db, fasta, args)
         if record:
             output_records.append(record)
         else:
@@ -301,7 +285,31 @@ def extract_all_terminators(fasta_fpath: str, gff_fpath: str, args: argparse.Nam
     print(f"skipped {skipped_count} transcripts")
 
 
-def find_files(dir: str) -> list[tuple[str, str]]:
+# --- HELPER FUNCTIONS ---
+
+def _format_fasta_record(tscript: gffutils.Feature, term_seq: str, raw_dna: bool) -> str:
+    """
+    Formats the given terminator sequence into a FASTA record header.
+
+    Returns:
+        str: The formatted FASTA record.
+    """
+    display_id = tscript.id
+    if "orig_protein_id" in tscript.attributes:
+        raw_id = tscript.attributes["orig_protein_id"][0]
+        display_id = raw_id.split('|')[-1]
+    
+    header = f">{display_id} | {tscript.chrom}:{tscript.start}-{tscript.end}({tscript.strand})"
+
+    term_seq = term_seq.upper()
+    if not raw_dna:
+        term_seq = term_seq.replace('T', 'U')
+    wrapped_seq = textwrap.fill(term_seq, width=80)
+
+    return f"{header}\n{wrapped_seq}\n"
+
+
+def _find_files(dir: str) -> list[tuple[str, str]]:
     """
     Searches the given directory for matching pairs of FASTA and GFF files.
 
@@ -340,35 +348,29 @@ def find_files(dir: str) -> list[tuple[str, str]]:
     return file_pairs
 
 
-def _worker(args: tuple) -> None:
+def _create_gff_db(gff_fpath: str, db_fpath: str) -> gffutils.FeatureDB:
     """
-    Extracts the terminator sequences of a single genome.
+    Creates a gffutils FeatureDB from the given GFF file if it does not already exist.
 
     Args:
-        args (tuple): A tuple containing (fasta_fpath, gff_fpath, cli_args).
+        gff_fpath (str): Filepath to the input GFF file.
+        db_fpath (str): Filepath to the output database file.
+
+    Returns:
+        gffutils.FeatureDB: The created FeatureDB object.
     """
-    fasta_fpath, gff_fpath, cli_args = args
-    extract_all_terminators(fasta_fpath, gff_fpath, cli_args)
+    assert os.path.isfile(gff_fpath), f"GFF file '{gff_fpath}' does not exist."
 
-def run_extraction(args: argparse.Namespace) -> int:
-    try:
-        # find all file pairs in the input directory
-        file_pairs = find_files(args.input_path)
-        tasks = [(file_pair[0], file_pair[1], args) for file_pair in file_pairs]
-
-        # process each genome in parallel
-        with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
-            list(executor.map(_worker, tasks))
-
-        print("\nTerminator extraction finished")
-        return 0
-    except Exception as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        return 1
-
-def main() -> int:
-    """Standalone execution entry point."""
-    return run_extraction(_get_args())
-
-if __name__ == "__main__":
-    sys.exit(main())
+    if not os.path.isfile(db_fpath):
+        print(f"Creating GFF database at '{db_fpath}'")
+        gffutils.create_db(
+            gff_fpath,
+            dbfn=db_fpath,
+            keep_order=True,
+            merge_strategy="create_unique",
+            sort_attribute_values=True,
+        )
+    else:
+        print(f"Using existing GFF database at '{db_fpath}'")
+    
+    return gffutils.FeatureDB(db_fpath)

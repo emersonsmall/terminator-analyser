@@ -75,14 +75,13 @@ def main() -> int:
             analyse_args.output_dir = os.path.join(taxon_dir, "plots")
 
             return run_analysis(analyse_args)
+        else:
+            print("Invalid command. Use -h for help.", file=sys.stderr)
+            return 1
 
     except Exception as e:
         print(f"\nERROR: {e}", file=sys.stderr)
         return 1
-
-    print("\nFINISHED")
-    return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())
