@@ -1,43 +1,39 @@
-Terminator Analysis Pipeline
+# Terminator Analysis Pipeline
 
 This project is a bioinformatics pipeline designed to identify and analyse gene terminator signals. The pipeline fetches genomes, extracts terminator sequences (3' UTR + downstream regions), and analyses these sequences to find conserved positional signals (patterns within the Near-Upstream Elements (NUEs) and Cleavage Elements (CEs)).
 
 # Features
 
-Automated Genome Retrieval: Downloads specified reference genomes (FASTA and GFF files) for any taxon from the NCBI Datasets API.
+Genome Retrieval: Downloads specified reference genomes (FASTA and GFF files) for any taxon from the NCBI Datasets API.
 
-Terminator Extraction: Parses genome annotations to extract terminator sequences for each annotated transcript (mRNA).
+Terminator Extraction: Parses GFF files to extract terminator sequences.
 
 Filtering: Includes filters to remove likely internal priming artifacts.
 
 Signal Analysis: Scans the extracted sequences for conserved k-mers in the NUE and CE regions.
 
 Visualisation: Generates plots showing the positional distribution of the top-ranked signals.
--e   Modular & Integrated: Run steps individually (get, extract, analyse) or as a single, end-to-end command (full).
 
-Installation
-
-To get started, clone the repository and set up the Python environment.
-
-# 1. Clone the repository
+# Installation
+## 1. Clone the repository
 git clone [YOUR_REPO_URL_HERE]
 cd [repository-name]
 
-# 2. Create and activate a virtual environment
+## 2. Create and activate a virtual environment
 python -m venv venv
 source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
 
-# 3. Install the required packages
+## 3. Install the required packages
 pip install -r requirements.txt
 
-# 4. (Optional) Set your NCBI API Key
+## 4. (Optional) Set your NCBI API Key
 export NCBI_API_KEY="your_api_key_here"
 
-Usage
+# Usage
 
 The pipeline is controlled through main.py and is divided into four main commands: get, extract, analyse, and full. You can view all options for a command by using the -h flag (e.g., python main.py full -h).
 
-1. full - Run the End-to-End Pipeline
+## 1. full - Run the End-to-End Pipeline
 
 This is the command for a complete analysis. It fetches genomes, extracts terminators, and runs the analysis.
 
@@ -52,7 +48,7 @@ Individual Commands
 
 You can also run each step of the pipeline separately.
 
-2. get - Download Genomes
+## 2. get - Download Genomes
 
 Downloads FASTA and GFF files for a given taxon.
 
@@ -62,7 +58,7 @@ python main.py get "Saccharomyces cerevisiae"
 
 This will download all reference genomes for the specified taxon into the out/taxons/saccharomyces_cerevisiae/genomes directory.
 
-3. extract - Extract Terminator Sequences
+## 3. extract - Extract Terminator Sequences
 
 Extracts terminator sequences from the downloaded genome files.
 
@@ -73,7 +69,7 @@ python main.py extract "genome_data/taxons/saccharomyces_cerevisiae/genomes"
 
 This will create FASTA files containing the terminator sequences in the /terminators directory.
 
-4. analyse - Analyse Terminator Sequences
+## 4. analyse - Analyse Terminator Sequences
 
 Analyses the extracted terminator sequences to find conserved signals and generate plots.
 
