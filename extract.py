@@ -12,13 +12,6 @@ import gffutils # https://anaconda.org/bioconda/gffutils
 TERMINATOR_FILE_SUFFIX = "_terminators.fa"
 
 
-def main() -> int:
-    return run_extraction(_get_args())
-
-if __name__ == "__main__":
-    sys.exit(main())
-
-
 def run_extraction(args: argparse.Namespace) -> int:
     try:
         # find all file pairs in the input directory
@@ -286,7 +279,6 @@ def _extract_all_terminators(fasta_fpath: str, gff_fpath: str, args: argparse.Na
 
 
 # --- HELPER FUNCTIONS ---
-
 def _format_fasta_record(tscript: gffutils.Feature, term_seq: str, raw_dna: bool) -> str:
     """
     Formats the given terminator sequence into a FASTA record header.
@@ -374,3 +366,12 @@ def _create_gff_db(gff_fpath: str, db_fpath: str) -> gffutils.FeatureDB:
         print(f"Using existing GFF database at '{db_fpath}'")
     
     return gffutils.FeatureDB(db_fpath)
+
+
+# --- STANDALONE EXECUTION ---
+def main() -> int:
+    return run_extraction(_get_args())
+
+
+if __name__ == "__main__":
+    sys.exit(main())
