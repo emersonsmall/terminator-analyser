@@ -16,13 +16,6 @@ CHUNK_SIZE = 32 * 1024 # 32KB
 BACKOFF_FACTOR = 0.3
 
 
-def main():
-    return run_get_genomes(_get_args())
-
-if __name__ == "__main__":
-    sys.exit(main())
-
-
 def run_get_genomes(args: argparse.Namespace) -> int:
     try:
         taxon_path = get_genomes_by_taxon(
@@ -143,7 +136,6 @@ def get_genomes_by_taxon(
 
 
 # --- HELPER FUNCTIONS ---
-
 def _print_found_genomes(reports: list) -> None:
     num_genomes = len(reports)
     print(f"\nFound {num_genomes} reference genome{'s' if num_genomes != 1 else ''}:")
@@ -184,6 +176,7 @@ def _print_found_genomes(reports: list) -> None:
         print(fmt_string.format(**row))
     print()
 
+
 def _build_session() -> requests.Session:
     """
     Return a requests.Session configured with retry logic.
@@ -223,6 +216,7 @@ def _build_session() -> requests.Session:
     s.request_timeout = TIMEOUT_IN_SECONDS
     return s
 
+
 def _api_request(session: requests.Session, url: str, api_key: str) -> dict:
     headers = {"Accept": "application/json"}
     if api_key:
@@ -233,6 +227,7 @@ def _api_request(session: requests.Session, url: str, api_key: str) -> dict:
         return res.json()
     except requests.RequestException as e:
         raise Exception(f"API request failed for URL {url}: {e}")
+
 
 def _download_and_unzip(
         session: requests.Session,
@@ -292,3 +287,12 @@ def _download_and_unzip(
                 os.remove(tmp_zip)
             except Exception:
                 pass
+
+
+# --- STANDALONE EXECUTION ---
+def main():
+    return run_get_genomes(_get_args())
+
+
+if __name__ == "__main__":
+    sys.exit(main())

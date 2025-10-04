@@ -24,13 +24,6 @@ PLOT_CE_X_MAX = 15
 SIGNALS_PLOT_FILENAME = "_signals_plot.png"
 
 
-def main():
-    return run_analysis(_get_args())
-
-if __name__ == "__main__":
-    sys.exit(main())
-
-
 def run_analysis(args: argparse.Namespace) -> int:
     try:
         # Find all fasta files
@@ -258,7 +251,6 @@ def rank_kmers_by_delta(kmer_counts: dict, top_n: int) -> list:
 
 
 # --- HELPER FUNCTIONS ---
-
 def _print_report(region_name: str, kmers: list, kmer_size: int):
     print("\n" + "=" * 50)
     print(f"Top {len(kmers)} K-mers for {region_name}")
@@ -268,3 +260,11 @@ def _print_report(region_name: str, kmers: list, kmer_size: int):
     for i, item in enumerate(kmers):
         rank = i + 1
         print(f"{rank:<5} | {item['kmer']:<{kmer_size + 2}} | {item['delta']:>8.1f} | {item['peak_count']:>10,} | {item['peak_pos']:>8}")
+
+
+# --- STANDALONE EXECUTION ---
+def main():
+    return run_analysis(_get_args())
+
+if __name__ == "__main__":
+    sys.exit(main())

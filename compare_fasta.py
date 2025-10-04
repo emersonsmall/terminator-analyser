@@ -9,13 +9,6 @@ from textwrap import fill
 import re
 
 
-def main():
-    return _run_comparison(_get_args())
-    
-if __name__ == "__main__":
-    sys.exit(main())
-
-
 def _get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compares two FASTA files record by record based on their IDs.",
@@ -119,3 +112,12 @@ def _run_comparison(args: argparse.Namespace) -> int:
             print(f" ... and {num_missing_from_q - 20} more records.")
     
     return 0
+
+
+# --- STANDALONE EXECUTION ---
+def main():
+    return _run_comparison(_get_args())
+
+
+if __name__ == "__main__":
+    sys.exit(main())
