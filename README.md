@@ -1,19 +1,19 @@
 Terminator Analysis Pipeline
 
-This project is a bioinformatics pipeline designed to identify and analyse gene terminator signals. The pipeline automates the process of fetching genomes, extracting terminator sequences (3' UTR + downstream regions), and analysing these sequences to find conserved positional signals (Near-Upstream Elements (NUEs) and Cleavage Elements (CEs)).
+This project is a bioinformatics pipeline designed to identify and analyse gene terminator signals. The pipeline fetches genomes, extracts terminator sequences (3' UTR + downstream regions), and analyses these sequences to find conserved positional signals (patterns within the Near-Upstream Elements (NUEs) and Cleavage Elements (CEs)).
 
-Features
+# Features
 
-    Automated Genome Retrieval: Downloads specified reference genomes (FASTA and GFF files) for any taxon from the NCBI Datasets API.
+Automated Genome Retrieval: Downloads specified reference genomes (FASTA and GFF files) for any taxon from the NCBI Datasets API.
 
-    Terminator Extraction: Parses genome annotations to extract terminator sequences for each annotated transcript (mRNA).
+Terminator Extraction: Parses genome annotations to extract terminator sequences for each annotated transcript (mRNA).
 
-    Filtering: Includes filters to remove likely internal priming artifacts.
+Filtering: Includes filters to remove likely internal priming artifacts.
 
-    Signal Analysis: Scans the extracted sequences for conserved k-mers in the NUE and CE regions.
+Signal Analysis: Scans the extracted sequences for conserved k-mers in the NUE and CE regions.
 
-    Visualisation: Generates plots showing the positional distribution of the top-ranked signals.
-    -e   Modular & Integrated: Run steps individually (get, extract, analyse) or as a single, end-to-end command (full).
+Visualisation: Generates plots showing the positional distribution of the top-ranked signals.
+-e   Modular & Integrated: Run steps individually (get, extract, analyse) or as a single, end-to-end command (full).
 
 Installation
 
@@ -84,18 +84,18 @@ python main.py analyse "/terminators"
 
 This will save the plots to the /plots directory.
 
-File Descriptions
+# File Descriptions
 
-    main.py: The main entry point for the pipeline, handling command-line arguments and orchestrating the different modules.
+main.py: The main entry point for the pipeline, handling command-line arguments and orchestrating the different modules.
 
-    get_genomes.py: Contains functions for interacting with the NCBI Datasets API to download genomes.
+get_genomes.py: Contains functions for interacting with the NCBI Datasets API to download genomes.
 
-    extract.py: Handles the logic for parsing GFF and FASTA files to extract terminator sequences.
+extract.py: Handles the logic for parsing GFF and FASTA files to extract terminator sequences.
 
-    analyse.py: Implements the k-mer counting, ranking, and reporting for signal analysis.
+analyse.py: Implements the k-mer counting, ranking, and reporting for signal analysis.
 
-    plots.py: A helper module for generating the signal distribution plots using Matplotlib.
+plots.py: A helper module for generating the signal distribution plots using Matplotlib.
 
-    compare_fasta.py: A utility script to compare two FASTA files and report differences, useful for validation.
+compare_fasta.py: A utility script to compare two FASTA files and report differences, useful for validation.
 
-    requirements.txt: A list of the Python dependencies required to run the project.
+requirements.txt: A list of the Python dependencies required to run the project.
