@@ -44,10 +44,6 @@ python main.py full "Arabidopsis thaliana" --top-n 10
 
 This will create a './out' directory containing the downloaded genomes, extracted terminator sequences, and analysis plots.
 
-Individual Commands
-
-You can also run each step of the pipeline separately.
-
 ## 2. get - Download Genomes
 
 Downloads FASTA and GFF files for a given taxon.
