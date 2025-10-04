@@ -20,7 +20,7 @@ git clone [YOUR_REPO_URL_HERE]
 cd [repository-name]
 
 ## 2. Create and activate a virtual environment
-python -m venv venv
+python -m venv venv  
 source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
 
 ## 3. Install the required packages
