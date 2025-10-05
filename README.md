@@ -16,8 +16,8 @@ Visualisation: Generates plots showing the positional distribution of the top-ra
 
 # Installation
 ## 1. Clone the repository
-git clone [YOUR_REPO_URL_HERE]  
-cd [repository-name]
+git clone https://github.com/emersonsmall/terminator-analyser  
+cd terminator-analyser  
 
 ## 2. Create and activate a virtual environment
 python -m venv venv  
