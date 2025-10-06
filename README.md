@@ -14,18 +14,26 @@ Visualisation: Generates plots showing the positional distribution of the top-ra
 
 # Installation
 ## 1. Clone the repository
+```bash
 git clone https://github.com/emersonsmall/terminator-analyser  
 cd terminator-analyser  
+```
 
 ## 2. Create and activate a virtual environment
-```python -m venv venv\nsource venv/bin/activate```
-On Windows, use `venv\Scripts\activate`
+```bash
+python -m venv venv
+source ./venv/bin/activate # On Windows, use .\venv\Scripts\activate
+```
 
 ## 3. Install the required packages
+```bash
 pip install -r requirements.txt
+```
 
 ## 4. (Optional) Set your NCBI API Key
+```bash
 export NCBI_API_KEY="your_api_key_here"
+```
 
 # Usage
 The pipeline is controlled through main.py and is divided into four main commands: get, extract, analyse, and full. You can view all options for a command by using the -h flag (e.g., python main.py full -h).
@@ -36,7 +44,9 @@ This is the command for a complete analysis. It fetches genomes, extracts termin
 Example:
 Download the reference genome for Arabidopsis thaliana, extract its terminators, and analyse them to find the top 10 signals within the NUE and CE.
 
+```bash
 python main.py full "Arabidopsis thaliana" --top-n 10
+```
 
 This will create a './out' directory containing the downloaded genomes, terminator sequences, and analysis plots.
 
@@ -45,7 +55,9 @@ Downloads reference genome FASTA and GFF files for a given taxon.
 
 Example:
 
+```bash
 python main.py get "Saccharomyces cerevisiae"
+```
 
 This will download all reference genomes for the specified taxon into the 'out/taxons/saccharomyces_cerevisiae/genomes' directory.
 
@@ -55,7 +67,9 @@ Extracts terminator sequences from the specified genome files.
 Example:
 The input path should be a directory containing FASTA/GFF pairs.
 
+```bash
 python main.py extract "out/taxons/saccharomyces_cerevisiae/genomes"
+```
 
 This will create FASTA files containing the terminator sequences in the 'out/terminators' directory.
 
@@ -65,7 +79,9 @@ Analyses the specified terminator sequences to find conserved signals and genera
 Example:
 The input path should be a directory containing terminator FASTA files.
 
+```bash
 python main.py analyse "out/terminators"
+```
 
 This will save the plots to the 'out/plots' directory.
 
