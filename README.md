@@ -36,7 +36,7 @@ export NCBI_API_KEY="your_api_key_here"
 ```
 
 # Usage
-The pipeline is controlled through main.py and is divided into four main commands: get, extract, analyse, and full. You can view all options for a command by using the -h flag (e.g., python main.py full -h).
+The pipeline is controlled through main.py and is divided into four main commands: get, extract, analyse, and full. You can view all options for a command by using the -h flag (e.g., `python main.py full -h`).
 
 ## full - Run the End-to-End Pipeline
 This is the command for a complete analysis. It fetches genomes, extracts terminators, and runs the analysis.
