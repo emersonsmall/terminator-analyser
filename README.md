@@ -88,3 +88,5 @@ requirements.txt: A list of the Python dependencies required to run the project.
 Loke, J. C., Stahlberg, E. A., Strenski, D. G., Haas, B. J., Wood, P. C., & Li, Q. Q. (2005). Compilation of mRNA polyadenylation signals in Arabidopsis revealed a new signal element and potential secondary structures. Plant Physiology, 138(3), 1457–1468. https://doi.org/10.1104/pp.105.060541
 
 Beaudoing, E., Freier, S., Wyatt, J. R., Claverie, J. M., & Gautheret, D. (2000). Patterns of variant polyadenylation signal usage in human genes. Genome Research, 10(7), 1001–1010. https://doi.org/10.1101/gr.10.7.1001
+
+de Felippes, F. F., & Waterhouse, P. M. (2023). Plant terminators: the unsung heroes of gene expression. Journal of Experimental Botany, 74(7), 2239–2250. https://doi.org/10.1093/jxb/erac467
