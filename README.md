@@ -36,10 +36,10 @@ export NCBI_API_KEY="your_api_key_here"
 ```
 
 # Usage
-The pipeline is controlled through main.py and is divided into four main commands: get, extract, analyse, and full. You can view all options for a command by using the -h flag (e.g., `python main.py full -h`).
+The pipeline is controlled through main.py and is divided into four commands: get, extract, analyse, and full. You can view all options for a command by using the -h flag (e.g., `python main.py full -h`).
 
 ## full - Run the End-to-End Pipeline
-This is the command for a complete analysis. It fetches genomes, extracts terminators, and runs the analysis.
+Fetches genomes, extracts terminators, and runs the analysis.
 
 Example:
 Download the reference genome for Arabidopsis thaliana, extract its terminators, and analyse them to find the top 10 signals within the NUE and CE.
@@ -59,7 +59,7 @@ Example:
 python main.py get "Saccharomyces cerevisiae"
 ```
 
-This will download all reference genomes for the specified taxon into the 'out/taxons/saccharomyces_cerevisiae/genomes' directory.
+This will download all reference genomes for the specified taxon into the './out/taxons/saccharomyces_cerevisiae/genomes' directory.
 
 ## extract - Extract Terminators
 Extracts terminator sequences from the specified genome files.
@@ -71,7 +71,7 @@ The input path should be a directory containing FASTA/GFF pairs.
 python main.py extract "out/taxons/saccharomyces_cerevisiae/genomes"
 ```
 
-This will create FASTA files containing the terminator sequences in the 'out/terminators' directory.
+This will create FASTA files containing the terminator sequences in the './out/terminators' directory.
 
 ## analyse - Analyse Terminators
 Analyses the specified terminator sequences to find conserved signals and generate plots.
@@ -83,7 +83,7 @@ The input path should be a directory containing terminator FASTA files.
 python main.py analyse "out/terminators"
 ```
 
-This will save the plots to the 'out/plots' directory.
+This will save the plots to the './out/plots' directory.
 
 # File Descriptions
 main.py: The main entry point for the pipeline, handling command-line arguments and orchestrating the different modules.
@@ -99,8 +99,8 @@ plots.py: A helper module for generating the signal distribution plots using Mat
 compare_fasta.py: A utility script to compare two FASTA files and report differences, useful for validation.
 
 # References
-Loke, J. C., Stahlberg, E. A., Strenski, D. G., Haas, B. J., Wood, P. C., & Li, Q. Q. (2005). Compilation of mRNA polyadenylation signals in Arabidopsis revealed a new signal element and potential secondary structures. Plant Physiology, 138(3), 1457–1468. https://doi.org/10.1104/pp.105.060541
-
 Beaudoing, E., Freier, S., Wyatt, J. R., Claverie, J. M., & Gautheret, D. (2000). Patterns of variant polyadenylation signal usage in human genes. Genome Research, 10(7), 1001–1010. https://doi.org/10.1101/gr.10.7.1001
 
 de Felippes, F. F., & Waterhouse, P. M. (2023). Plant terminators: the unsung heroes of gene expression. Journal of Experimental Botany, 74(7), 2239–2250. https://doi.org/10.1093/jxb/erac467
+
+Loke, J. C., Stahlberg, E. A., Strenski, D. G., Haas, B. J., Wood, P. C., & Li, Q. Q. (2005). Compilation of mRNA polyadenylation signals in Arabidopsis revealed a new signal element and potential secondary structures. Plant Physiology, 138(3), 1457–1468. https://doi.org/10.1104/pp.105.060541
