@@ -9,6 +9,12 @@ from extract import TERMINATOR_FILE_SUFFIX
 from plots import plot_signal_distribution
 import pyfaidx
 
+# TODO: add more visualisations, like Loke Figure 1C, 1D and Figure 3.
+# TODO: add metrics to measure conservation
+# TODO: add feature to identity unique signals in a target gene. Compare gene terminator vs rest of genome vs whole genus
+# TODO: replace delta score with more robust method of filtering noise
+# TODO: clarify filtering. Are internal priming artefacts relevant for raw genome sequences (not using RNA transcripts)? Filter in one place - include all terminators, and then skip in analysis?
+
 # Coordinates: -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 
 # Analysis window coordinates
