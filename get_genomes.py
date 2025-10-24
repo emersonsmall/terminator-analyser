@@ -9,6 +9,8 @@ import shutil
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+# TODO: handle case where NCBI datasets API returns multi-page response of taxon metadata.
+
 GENBANK_API_BASE_URL = "https://api.ncbi.nlm.nih.gov/datasets/v2"
 RETRIES = 3
 TIMEOUT_IN_SECONDS = 30
