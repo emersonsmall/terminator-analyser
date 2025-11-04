@@ -1,5 +1,5 @@
-# Terminator Analysis Pipeline
-This project is a bioinformatics pipeline designed to extract and analyse plant gene terminators. The pipeline fetches genomes, extracts terminator sequences (3' UTR + downstream region), and analyses these sequences to find conserved positional signals (patterns within the Near-Upstream Elements (NUEs) and Cleavage Elements (CEs)).
+# Gene Terminator Analyser
+This is a bioinformatics tool designed to extract and analyse plant gene terminators. The pipeline fetches genomes, extracts terminator sequences (3' UTR + downstream region), and analyses these sequences to find conserved positional signals (patterns within the Near-Upstream Elements (NUEs) and Cleavage Elements (CEs)). The methodology is heavily drawn from Loke et al (2005), and this tools seeks to reproduce this type of analysis for any set of annotated genomes.
 
 # Features
 Genome Retrieval: Downloads reference genomes (FASTA and GFF files) using the NCBI Datasets API for any taxon.
