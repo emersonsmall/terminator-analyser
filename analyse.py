@@ -13,7 +13,8 @@ import pyfaidx
 # TODO: add metrics to measure conservation
 # TODO: add feature to identity unique signals in a target gene. Compare gene terminator vs rest of genome vs whole genus
 # TODO: replace delta score with more robust method of filtering noise
-# TODO: clarify filtering. Are internal priming artefacts relevant for raw genome sequences (not using RNA transcripts)? Filter in one place - include all terminators, and then skip in analysis?
+# TODO: clarify filtering. Are internal priming artefacts relevant for raw genome sequences (not using RNA transcripts as in the Loke paper)?
+# TODO: Filter in one place - include all terminators, and then skip in analysis?
 
 # Coordinates: -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 
@@ -63,11 +64,11 @@ def run_analysis(args: argparse.Namespace) -> int:
                 
                 terminators.append(seq)
         
-        nue_counts = get_kmer_counts(terminators, NUE_START, NUE_END, args.kmer_size, args.downstream_nts, args.step_size)
-        ce_counts = get_kmer_counts(terminators, CE_START, CE_END, args.kmer_size, args.downstream_nts, args.step_size)
+        nue_counts = _count_kmers(terminators, NUE_START, NUE_END, args.kmer_size, args.downstream_nts, args.step_size)
+        ce_counts = _count_kmers(terminators, CE_START, CE_END, args.kmer_size, args.downstream_nts, args.step_size)
 
-        ranked_nue_kmers = rank_kmers_by_delta(nue_counts, args.top_n)
-        ranked_ce_kmers = rank_kmers_by_delta(ce_counts, args.top_n)
+        ranked_nue_kmers = _rank_kmers(nue_counts, args.top_n)
+        ranked_ce_kmers = _rank_kmers(ce_counts, args.top_n)
 
         print(f"\n{skipped} of {num_terminators} ({(skipped/num_terminators * 100):.2f}%) terminator sequences skipped due to insufficient 3'UTR length")
         _print_report("CE", ranked_ce_kmers, args.kmer_size)
@@ -167,7 +168,7 @@ def _get_args() -> argparse.Namespace:
     return args
 
 
-def get_kmer_counts(sequences: list[str], region_start: int, region_end: int, kmer_size: int, downstream_nts: int, step_size: int = 1) -> dict:
+def _count_kmers(sequences: list[str], region_start: int, region_end: int, kmer_size: int, downstream_nts: int, step_size: int = 1) -> dict:
     """
     Counts k-mers at each position in the specified region across all sequences.
     If region_start and region_end are 0, counts k-mers across the whole sequence.
@@ -205,7 +206,7 @@ def get_kmer_counts(sequences: list[str], region_start: int, region_end: int, km
     return positional_counts
 
 
-def rank_kmers_by_delta(kmer_counts: dict, top_n: int) -> list:
+def _rank_kmers(kmer_counts: dict, top_n: int) -> list:
     """
     Ranks k-mers by the difference between their peak and median counts.
     Returns the top N k-mers with the highest delta.
