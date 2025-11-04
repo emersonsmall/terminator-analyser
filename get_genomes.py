@@ -9,18 +9,20 @@ import shutil
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# TODO: handle case where NCBI datasets API returns multi-page response of taxon metadata.
 
-GENBANK_API_BASE_URL = "https://api.ncbi.nlm.nih.gov/datasets/v2"
+NCBI_DATASETS_API_BASE_URL = "https://api.ncbi.nlm.nih.gov/datasets/v2"
+TAXON_ENDPOINT = f"{NCBI_DATASETS_API_BASE_URL}/genome/taxon"
+ACCESSION_ENDPOINT = f"{NCBI_DATASETS_API_BASE_URL}/genome/accession"
+
 RETRIES = 3
 TIMEOUT_IN_SECONDS = 30
-CHUNK_SIZE = 32 * 1024 # 32KB
+CHUNK_SIZE = 32 * 1024
 BACKOFF_FACTOR = 0.3
 
 
 def run_get_genomes(args: argparse.Namespace) -> int:
     try:
-        taxon_path = get_genomes_by_taxon(
+        taxon_path = _get_genomes_by_taxon(
             args.taxon,
             args.api_key,
             args.output_dir,
@@ -75,7 +77,7 @@ def _get_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def get_genomes_by_taxon(
+def _get_genomes_by_taxon(
         taxon: str,
         api_key: str,
         output_dir: str,
@@ -88,20 +90,15 @@ def get_genomes_by_taxon(
     session = _build_session()
     try:
         taxon = taxon.strip()
-        report_url = f"{GENBANK_API_BASE_URL}/genome/taxon/{requests.utils.quote(taxon)}/dataset_report?filters.reference_only=true"
-        report_res = _api_request(session, report_url, api_key)
-        reports = report_res.get("reports")
+        report_url = f"{TAXON_ENDPOINT}/{requests.utils.quote(taxon)}/dataset_report?filters.reference_only=true"
+        reports = _fetch_all_pages(session, report_url, api_key, max_genomes)
 
         if not reports:
             raise Exception(f"No reference genomes found for taxon '{taxon}'")
 
-        if max_genomes is not None:
-            reports = reports[:max_genomes]
-
         _print_found_genomes(reports)
 
         num_genomes = len(reports)
-
         taxon_dir_name = reports[0].get("organism").get("organism_name")
         if num_genomes > 1:
             taxon_dir_name = taxon_dir_name.split(" ")[0] # use genus for dir name
@@ -124,7 +121,7 @@ def get_genomes_by_taxon(
             
             organism_name = report.get("organism").get("organism_name", "N/A")
             print(f"\nDownloading genome {i}/{num_genomes}: {organism_name} ({accession})")
-            download_url = f"{GENBANK_API_BASE_URL}/genome/accession/{accession}/download?include_annotation_type=GENOME_FASTA,GENOME_GFF"
+            download_url = f"{ACCESSION_ENDPOINT}/{accession}/download?include_annotation_type=GENOME_FASTA,GENOME_GFF"
             _download_and_unzip(session, download_url, api_key, genomes_dir_path, accession)
             num_downloaded += 1
         
@@ -138,6 +135,52 @@ def get_genomes_by_taxon(
 
 
 # --- HELPER FUNCTIONS ---
+def _fetch_all_pages(
+    session: requests.Session,
+    base_url: str,
+    api_key: Optional[str] = None,
+    max_genomes: Optional[int] = None,
+) -> list:
+    """
+    Fetches all pages of genomes reports for the NCBI Datasets API taxon report endpoint.
+    
+    Args:
+        session: The requests.Session object to use for the API requests.
+        base_url: The base URL of the API endpoint to fetch the reports from.
+        api_key: The API key to use for the API requests.
+        max_genomes: The maximum number of genomes to fetch.
+
+    Returns:
+        A list of all genome reports, optionally limited to the first `max_genomes` reports.
+    """
+
+    all_reports = []
+    next_page_token = None
+    page = 1
+
+    while True:
+        if next_page_token:
+            url = f"{base_url}&page_token={requests.utils.quote(next_page_token)}"
+        else:
+            url = base_url
+        
+        res = _api_request(session, url, api_key)
+        page_reports = res.get("reports", [])
+        all_reports.extend(page_reports)
+
+        if max_genomes is not None and len(all_reports) >= max_genomes:
+            all_reports = all_reports[:max_genomes]
+            break
+
+        next_page_token = res.get("next_page_token")
+        if not next_page_token:
+            break
+
+        page += 1
+
+    return all_reports
+
+
 def _print_found_genomes(reports: list) -> None:
     num_genomes = len(reports)
     print(f"\nFound {num_genomes} reference genome{'s' if num_genomes != 1 else ''}:")

@@ -114,7 +114,6 @@ def _run_comparison(args: argparse.Namespace) -> int:
     return 0
 
 
-# --- STANDALONE EXECUTION ---
 def main():
     return _run_comparison(_get_args())
 

@@ -137,8 +137,8 @@ def _extract_terminator(
     downstream_nts: int,
 ) -> str | None:
     """
-    Extracts the terminator sequence (3'UTR + downstream region) for a given transcript feature.
-    Handles strand and reverse complementing as needed.
+    Extracts the terminator sequence for a given transcript feature.
+    Handles strand sense and reverse complementing.
     """
     # All coordinates 1-based until modified in slice operations
     # Python slices are 0-based, end-exclusive -> subtract 1 only for start coords
@@ -217,7 +217,12 @@ def _filter_sequence(term_seq: str, args: argparse.Namespace) -> bool:
     return True
 
 
-def _process_transcript(tscript: gffutils.Feature, db: gffutils.FeatureDB, fasta: pyfaidx.Fasta, args: argparse.Namespace) -> str | None:
+def _process_transcript(
+    tscript: gffutils.Feature, 
+    db: gffutils.FeatureDB, 
+    fasta: pyfaidx.Fasta, 
+    args: argparse.Namespace
+) -> str | None:
     """Processes a single transcript feature to extract and format its terminator sequence."""
     try:
         cds_features = list(db.children(tscript, featuretype="CDS", order_by="start"))
@@ -237,14 +242,18 @@ def _process_transcript(tscript: gffutils.Feature, db: gffutils.FeatureDB, fasta
         return None
 
 
-def _extract_all_terminators(fasta_fpath: str, gff_fpath: str, args: argparse.Namespace) -> None:
+def _extract_all_terminators(
+    fasta_fpath: str, 
+    gff_fpath: str, 
+    args: argparse.Namespace
+) -> None:
     """
-    Extracts terminator sequences (3'UTR + downstream region) from the given fasta and gff files.
+    Extracts terminator sequences from the given fasta and gff files.
 
     Args:
-        fasta_fpath (str): Filepath to the input FASTA file.
-        gff_fpath (str): Filepath to the input GFF file.
-        args (argparse.Namespace): Parsed command-line arguments.
+        fasta_fpath: Filepath to the input FASTA file.
+        gff_fpath: Filepath to the input GFF file.
+        args: Parsed command-line arguments.
     """
     assert os.path.isfile(fasta_fpath), f"Fasta file '{fasta_fpath}' does not exist."
     assert os.path.isfile(gff_fpath), f"GFF file '{gff_fpath}' does not exist."
@@ -279,12 +288,16 @@ def _extract_all_terminators(fasta_fpath: str, gff_fpath: str, args: argparse.Na
 
 
 # --- HELPER FUNCTIONS ---
-def _format_fasta_record(tscript: gffutils.Feature, term_seq: str, raw_dna: bool) -> str:
+def _format_fasta_record(
+    tscript: gffutils.Feature, 
+    term_seq: str, 
+    raw_dna: bool
+) -> str:
     """
     Formats the given terminator sequence into a FASTA record header.
 
     Returns:
-        str: The formatted FASTA record.
+        The formatted FASTA record.
     """
     display_id = tscript.id
     if "orig_protein_id" in tscript.attributes:
@@ -345,11 +358,11 @@ def _create_gff_db(gff_fpath: str, db_fpath: str) -> gffutils.FeatureDB:
     Creates a gffutils FeatureDB from the given GFF file if it does not already exist.
 
     Args:
-        gff_fpath (str): Filepath to the input GFF file.
-        db_fpath (str): Filepath to the output database file.
+        gff_fpath: Filepath to the input GFF file.
+        db_fpath: Filepath to the output database file.
 
     Returns:
-        gffutils.FeatureDB: The created FeatureDB object.
+        The created FeatureDB object.
     """
     assert os.path.isfile(gff_fpath), f"GFF file '{gff_fpath}' does not exist."
 
