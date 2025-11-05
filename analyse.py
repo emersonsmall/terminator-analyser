@@ -15,6 +15,7 @@ import pyfaidx
 # TODO: replace delta score with more robust method of filtering noise
 # TODO: Are internal priming artefacts relevant for raw genome sequences (not using RNA transcripts as in the Loke paper)?
 # TODO: Filter in one place - include all terminators, and then skip in analysis?
+# TODO: try to identify relationship between patterns in terminator and mRNA stability (half-life)
 
 # Coordinates: -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 
