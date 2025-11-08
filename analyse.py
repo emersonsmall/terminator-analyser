@@ -16,6 +16,7 @@ import pyfaidx
 # TODO: Are internal priming artefacts relevant for raw genome sequences (not using RNA transcripts as in the Loke paper)?
 # TODO: Filter in one place - include all terminators, and then skip in analysis?
 # TODO: try to identify relationship between patterns in terminator and mRNA stability (half-life)
+# TODO: validate args in full pipeline as well as standalone
 
 # Coordinates: -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 
@@ -33,6 +34,14 @@ SIGNALS_PLOT_FILENAME = "_signals_plot.png"
 
 
 def run_analysis(args: argparse.Namespace) -> int:
+    """Runs full analysis of terminators.
+    
+    Args:
+        args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        int: Exit code (0 for success, 1 for failure).
+    """
     try:
         # Find all fasta files
         fasta_files = []
@@ -105,6 +114,12 @@ def run_analysis(args: argparse.Namespace) -> int:
 
 
 def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
+    """Adds command-line arguments for the analysis module to the given parser.
+
+    Args:
+        parser (argparse.ArgumentParser): The argument parser to which the arguments will be added.
+        standalone (bool): Whether to include standalone execution arguments. Defaults to True.
+    """
     parser.add_argument(
         "-n",
         "--top-n",
@@ -154,6 +169,11 @@ def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True)
         )
 
 def _get_args() -> argparse.Namespace:
+    """Parses and validates command-line arguments for standalone execution.
+    
+    Returns:
+        argparse.Namespace: Parsed command-line arguments.
+    """
     parser = argparse.ArgumentParser(
         description="Analyses the NUE and CE regions of the given terminator sequences."
     )
@@ -180,6 +200,9 @@ def _count_kmers(sequences: list[str], region_start: int, region_end: int, kmer_
         region_end (int): End position of the region.
         kmer_size (int): Size of the k-mers to count.
         step_size (int): Step size for k-mer counting (=1: overlapping k-mers. =kmer_size: non-overlapping k-mers)
+
+    Returns:
+        dict: Dictionary of k-mer counts by position { kmer: { pos1: count, pos2: count } }.
     """
     assert isinstance(sequences, list) and all(isinstance(s, str) for s in sequences), "Sequences must be a list of strings."
     assert isinstance(region_start, int) and isinstance(region_end, int), "Region start and end must be integers."
