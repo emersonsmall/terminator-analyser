@@ -17,6 +17,7 @@ import pyfaidx
 # TODO: Filter in one place - include all terminators, and then skip in analysis?
 # TODO: try to identify relationship between patterns in terminator and mRNA stability (half-life)
 # TODO: validate args in full pipeline as well as standalone
+# TODO: terminate gracefully
 
 # Coordinates: -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 
@@ -34,7 +35,7 @@ SIGNALS_PLOT_FILENAME = "_signals_plot.png"
 
 
 def run_analysis(args: argparse.Namespace) -> int:
-    """Runs full analysis of terminators.
+    """Runs a full analysis of terminator sequences.
     
     Args:
         args (argparse.Namespace): Parsed command-line arguments.
@@ -113,8 +114,8 @@ def run_analysis(args: argparse.Namespace) -> int:
         return 1
 
 
-def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
-    """Adds command-line arguments for the analysis module to the given parser.
+def add_analyse_args(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
+    """Adds command-line arguments for the `analyse` command to the given parser.
 
     Args:
         parser (argparse.ArgumentParser): The argument parser to which the arguments will be added.
@@ -177,7 +178,7 @@ def _get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Analyses the NUE and CE regions of the given terminator sequences."
     )
-    add_args_to_parser(parser)
+    add_analyse_args(parser)
 
     args = parser.parse_args()
     if not os.path.exists(args.input_path):
@@ -189,17 +190,24 @@ def _get_args() -> argparse.Namespace:
     return args
 
 
-def _count_kmers(sequences: list[str], region_start: int, region_end: int, kmer_size: int, downstream_nts: int, step_size: int = 1) -> dict:
+def _count_kmers(
+    sequences: list[str], 
+    region_start: int, 
+    region_end: int, 
+    kmer_size: int, 
+    downstream_nts: int, 
+    step_size: int = 1
+) -> dict:
     """
-    Counts k-mers at each position in the specified region across all sequences.
+    Counts k-mers at each position within the specified region across all sequences.
     If region_start and region_end are 0, counts k-mers across the whole sequence.
     
     Args:
-        sequences (list[str]): List of sequences to analyze.
-        region_start (int): Start position of the region (where last nt of 3'UTR = -1, e.g., -50).
+        sequences (list[str]): List of sequences to analyse.
+        region_start (int): Start position of the region (-1 is last nt of 3'UTR, +1 is first nt of downstream region).
         region_end (int): End position of the region.
-        kmer_size (int): Size of the k-mers to count.
-        step_size (int): Step size for k-mer counting (=1: overlapping k-mers. =kmer_size: non-overlapping k-mers)
+        kmer_size (int): Size of the k-mers.
+        step_size (int): Step size for k-mer counting (1: overlapping k-mers. kmer_size: non-overlapping k-mers)
 
     Returns:
         dict: Dictionary of k-mer counts by position { kmer: { pos1: count, pos2: count } }.
@@ -239,7 +247,7 @@ def _rank_kmers(kmer_counts: dict, top_n: int) -> list:
         kmer_counts (dict): Dictionary of k-mer counts by position.
         top_n (int): Number of top k-mers to return.
     """
-    assert isinstance(kmer_counts, dict), "K-mer counts must be a dictionary."
+    assert isinstance(kmer_counts, dict)
     assert isinstance(top_n, int) and top_n > 0, "Top N must be a positive integer."
 
     heap = []
@@ -282,7 +290,14 @@ def _rank_kmers(kmer_counts: dict, top_n: int) -> list:
 
 
 # --- HELPER FUNCTIONS ---
-def _print_report(region_name: str, kmers: list, kmer_size: int):
+def _print_report(region_name: str, kmers: list, kmer_size: int) -> None:
+    """Prints a formatted output report of top k-mers.
+
+    Args:
+        region_name (str): Name of the region (e.g., "NUE" or "CE").
+        kmers (list): List of top k-mers with their statistics.
+        kmer_size (int): Size of the k-mers.
+    """
     print("\n" + "=" * 50)
     print(f"Top {len(kmers)} K-mers for {region_name}")
     print("=" * 50)

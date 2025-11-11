@@ -39,7 +39,13 @@ def _worker(args: tuple) -> None:
     _extract_all_terminators(fasta_fpath, gff_fpath, cli_args)
 
 
-def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
+def add_extract_args(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
+    """Adds command-line arguments for the `extract` command to the given parser.
+
+    Args:
+        parser (argparse.ArgumentParser): The argument parser to which the arguments will be added.
+        standalone (bool): Whether to include standalone execution arguments. Defaults to True.
+    """
     parser.add_argument(
         "-r",
         "--raw-dna",
@@ -88,7 +94,7 @@ def _get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Extract terminators for the given genomes/genus."
     )
-    add_args_to_parser(parser)
+    add_extract_args(parser)
 
     args = parser.parse_args()
     if not os.path.isdir(args.input_path):

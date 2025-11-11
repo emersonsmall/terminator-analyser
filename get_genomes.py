@@ -37,8 +37,13 @@ def run_get_genomes(args: argparse.Namespace) -> int:
         return 1
 
 
-def add_args_to_parser(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
-    """Adds genome retrieval arguments to the given parser."""
+def add_get_args(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
+    """Adds command-line arguments for the `get` command to the given parser.
+
+    Args:
+        parser (argparse.ArgumentParser): The argument parser to which the arguments will be added.
+        standalone (bool): Whether to include standalone execution arguments. Defaults to True.
+    """
     parser.add_argument(
         "taxon",
         help="Taxon name (e.g., 'Arabidopsis' or 'Arabidopsis thaliana')."
@@ -73,7 +78,7 @@ def _get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Gets FASTA and GFF files for the given taxon using the Genbank API"
     )
-    add_args_to_parser(parser)
+    add_get_args(parser)
     return parser.parse_args()
 
 

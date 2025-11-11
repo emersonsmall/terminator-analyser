@@ -2,9 +2,9 @@ import argparse
 import sys
 import os
 
-from get_genomes import run_get_genomes, add_args_to_parser as add_get_args
-from extract import run_extraction, add_args_to_parser as add_extract_args
-from analyse import run_analysis, add_args_to_parser as add_analyse_args
+from get_genomes import run_get_genomes, add_get_args
+from extract import run_extraction, add_extract_args
+from analyse import run_analysis, add_analyse_args
 
 
 def main() -> int:
@@ -27,6 +27,7 @@ def main() -> int:
         "-o", "--output-dir", default="out",
         help="Path to the output directory (default: ./out)."
     )
+    
     # Add unique args from all steps
     add_get_args(full_parser, standalone=False)
     add_extract_args(full_parser, standalone=False)
