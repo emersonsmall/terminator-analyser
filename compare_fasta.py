@@ -21,7 +21,7 @@ def _get_args() -> argparse.Namespace:
         parser.error(f"Reference FASTA file '{args.reference_fasta}' does not exist.")
     if not os.path.isfile(args.query_fasta):
         parser.error(f"Query FASTA file '{args.query_fasta}' does not exist.")
-    
+
     return args
 
 
@@ -41,16 +41,18 @@ def _parse_fasta(fasta_fpath, is_query) -> dict[str, str]:
             strand = "n/a"
 
             if is_query:
-                match = re.search(r'\(([+-?])\)$', header)
+                match = re.search(r"\(([+-?])\)$", header)
                 if match:
                     strand = match.group(1)
-                
+
             data[record_id] = (seq, strand)
 
     except pyfaidx.FastaIndexingError as e:
-        print(f"ERROR: could not parse FASTA file '{fasta_fpath}': {e}", file=sys.stderr)
+        print(
+            f"ERROR: could not parse FASTA file '{fasta_fpath}': {e}", file=sys.stderr
+        )
         sys.exit(1)
-    
+
     return data
 
 
@@ -79,8 +81,12 @@ def _run_comparison(args: argparse.Namespace) -> int:
         if ref == query:
             matches += 1
         else:
-            mismatches[record_id] = (fill(ref, width=80), fill(query, width=80), query_strand)
-    
+            mismatches[record_id] = (
+                fill(ref, width=80),
+                fill(query, width=80),
+                query_strand,
+            )
+
     num_mismatches = len(mismatches)
     num_missing_from_q = len(missing_from_query)
     num_common = len(common_ids)
@@ -91,7 +97,7 @@ def _run_comparison(args: argparse.Namespace) -> int:
     print(f" - Mismatches: {num_mismatches} ({num_mismatches / num_common * 100:.2f}%)")
     print(f"Records only in reference FASTA: {num_missing_from_q}")
     print(f"Records only in query FASTA: {len(extra_in_query)}")
-    
+
     if mismatches:
         print("\nMismatched Records:")
         for record_id in sorted(mismatches)[:20]:
@@ -103,14 +109,14 @@ def _run_comparison(args: argparse.Namespace) -> int:
             print("-" * 30)
         if num_mismatches > 20:
             print(f" ... and {num_mismatches - 20} more mismatches.")
-        
+
     if missing_from_query:
         print("\nRecords only in reference FASTA:")
         for record_id in sorted(list(missing_from_query))[:20]:
             print(f" - {record_id}")
         if num_missing_from_q > 20:
             print(f" ... and {num_missing_from_q - 20} more records.")
-    
+
     return 0
 
 

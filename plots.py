@@ -1,15 +1,24 @@
+# External libraries
 import pandas as pd
 import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 
+matplotlib.use("Agg")
+
 CS_POSITION = 1
-LINESTYLES = ['-', '--', '-.', ':']
-MARKERS = ['o', 's', '^', 'D', 'v', 'P', '*', 'X']
+LINESTYLES = ["-", "--", "-.", ":"]
+MARKERS = ["o", "s", "^", "D", "v", "P", "*", "X"]
 
 
-def plot_signal_distribution(ranked_kmers: list, counts_data: dict, region: str, x_min: int, x_max: int, out_file: str) -> None:
+def plot_signal_distribution(
+    ranked_kmers: list,
+    counts_data: dict,
+    region: str,
+    x_min: int,
+    x_max: int,
+    out_file: str,
+) -> None:
     """
     Generates and saves a line plot using a list of ranked k-mers and their positional counts.
 
@@ -22,7 +31,7 @@ def plot_signal_distribution(ranked_kmers: list, counts_data: dict, region: str,
     tick_interval = 5
     top_n = len(ranked_kmers)
 
-    top_kmers = [item['kmer'] for item in ranked_kmers]
+    top_kmers = [item["kmer"] for item in ranked_kmers]
 
     # Prepare data for plotting
     plot_data = {kmer: counts_data.get(kmer, {}) for kmer in top_kmers}
@@ -43,21 +52,19 @@ def plot_signal_distribution(ranked_kmers: list, counts_data: dict, region: str,
             label=kmer,
             linestyle=linestyle,
             marker=marker,
-            markersize=5
+            markersize=5,
         )
-    
+
     # Style plot
-    ax.set_xlabel('Position relative to CS', fontsize=12)
-    ax.set_ylabel('Count', fontsize=12)
-    ax.set_title(f'Distribution of Top {top_n} Signals in {region}', fontsize=14, weight='bold')
-    ax.grid(True, which='both', linestyle='--', linewidth=0.5)
+    ax.set_xlabel("Position relative to CS", fontsize=12)
+    ax.set_ylabel("Count", fontsize=12)
+    ax.set_title(
+        f"Distribution of Top {top_n} Signals in {region}", fontsize=14, weight="bold"
+    )
+    ax.grid(True, which="both", linestyle="--", linewidth=0.5)
     ax.set_ylim(bottom=0)
 
-    ax.legend(
-        loc='upper center',
-        bbox_to_anchor=(0.5, -0.15),
-        ncols=5
-    )
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncols=5)
 
     ax.set_xlim(x_min, x_max)
     if region.upper() == "CE":
@@ -68,7 +75,7 @@ def plot_signal_distribution(ranked_kmers: list, counts_data: dict, region: str,
         ax.set_xticks(ticks)
     else:
         ax.set_xticks(range(x_min, x_max + 1, tick_interval))
-    
+
     plt.tight_layout()
 
     # Save plot
