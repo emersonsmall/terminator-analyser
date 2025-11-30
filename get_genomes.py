@@ -101,7 +101,7 @@ def _get_genomes_by_taxon(
 
     session = _build_session()
     try:
-        taxon = taxon.strip() # TODO: should clean args in get args function
+        taxon = taxon.strip()  # TODO: should clean args in get args function
         report_url = f"{TAXON_ENDPOINT}/{requests.utils.quote(taxon)}/dataset_report?{','.join(DATASET_REPORT_FILTERS)}"
         reports = _fetch_all_pages(session, report_url, api_key, max_genomes)
 
@@ -363,6 +363,7 @@ def _download_and_extract(
 # --- STANDALONE EXECUTION ---
 def main():
     return run_get_genomes(_get_args())
+
 
 if __name__ == "__main__":
     sys.exit(main())

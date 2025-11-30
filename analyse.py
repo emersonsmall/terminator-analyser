@@ -31,7 +31,9 @@ from plots import plot_signal_distribution
 # Analysis window coordinates
 NUE_START = -50
 NUE_END = -1
-CE_START = -10 # Loke paper uses -15, but -10 gives better results. AAUAAA and other NUE signals dominate if using -15
+CE_START = (
+    -10
+)  # Loke paper uses -15, but -10 gives better results. AAUAAA and other NUE signals dominate if using -15
 CE_END = 20
 
 PLOT_NUE_X_MIN = -35

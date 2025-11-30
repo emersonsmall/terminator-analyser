@@ -1,4 +1,5 @@
 # External libraries
+from cProfile import label
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
@@ -9,6 +10,7 @@ matplotlib.use("Agg")
 CS_POSITION = 1
 LINESTYLES = ["-", "--", "-.", ":"]
 MARKERS = ["o", "s", "^", "D", "v", "P", "*", "X"]
+NUM_LEGEND_COLS = 5
 
 
 def plot_signal_distribution(
@@ -23,10 +25,10 @@ def plot_signal_distribution(
     Generates and saves a line plot using a list of ranked k-mers and their positional counts.
 
     Args:
-        ranked_kmers (list): List of dictionaries containing k-mer information.
-        counts_data (dict): Dictionary with k-mer positional counts.
-        region (str): Name of the region being analyzed.
-        out_file (str): Path to save the output plot image.
+        ranked_kmers: List of dictionaries containing k-mer information.
+        counts_data: Dictionary with k-mer positional counts.
+        region: Name of the region being analyzed.
+        out_file: Path to save the output plot image.
     """
     tick_interval = 5
     top_n = len(ranked_kmers)
@@ -64,7 +66,28 @@ def plot_signal_distribution(
     ax.grid(True, which="both", linestyle="--", linewidth=0.5)
     ax.set_ylim(bottom=0)
 
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncols=5)
+    # re-arrange legend into row-major order
+    num_signals = len(top_kmers)
+    nrows = (num_signals + NUM_LEGEND_COLS - 1) // NUM_LEGEND_COLS
+    handles, labels = ax.get_legend_handles_labels()
+
+    handles_rm = []
+    labels_rm = []
+
+    for col in range(NUM_LEGEND_COLS):
+        for row in range(nrows):
+            idx = row * NUM_LEGEND_COLS + col  # row-major index
+            if idx < num_signals:
+                handles_rm.append(handles[idx])
+                labels_rm.append(labels[idx])
+
+    ax.legend(
+        handles_rm,
+        labels_rm,
+        ncols=NUM_LEGEND_COLS,
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.30),
+    )
 
     ax.set_xlim(x_min, x_max)
     if region.upper() == "CE":

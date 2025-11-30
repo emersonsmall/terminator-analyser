@@ -7,8 +7,8 @@ import textwrap
 from collections import defaultdict
 
 # External libraries
-import pyfaidx # https://anaconda.org/bioconda/pyfaidx
-import gffutils # https://anaconda.org/bioconda/gffutils
+import pyfaidx  # https://anaconda.org/bioconda/pyfaidx
+import gffutils  # https://anaconda.org/bioconda/gffutils
 
 # Internal modules
 from get_genomes import VALID_FASTA_EXTS, VALID_GFF_EXTS
@@ -295,7 +295,7 @@ def _extract_all_terminators(
     print(f"Processing genome '{fname}'")
 
     db_dir = os.path.join(
-        "out", "gff_dbs" # TODO: make this adapt to diff output folders
+        "out", "gff_dbs"  # TODO: make this adapt to diff output folders
     )  # Allows reuse of DBs between different taxons
 
     os.makedirs(args.output_dir, exist_ok=True)
