@@ -9,12 +9,12 @@ import tempfile
 import shutil
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from urllib.parse import quote
 
 
 NCBI_DATASETS_API_BASE_URL = "https://api.ncbi.nlm.nih.gov/datasets/v2"
-TAXON_ENDPOINT = f"{NCBI_DATASETS_API_BASE_URL}/genome/taxon"
-ACCESSION_ENDPOINT = f"{NCBI_DATASETS_API_BASE_URL}/genome/accession"
-GENOME_FILE_FILTERS = ("GENOME_FASTA", "GENOME_GFF", "GENOME_GTF")
+TAXON_BASE_URL = f"{NCBI_DATASETS_API_BASE_URL}/genome/taxon"
+ACCESSION_BASE_URL = f"{NCBI_DATASETS_API_BASE_URL}/genome/accession"
 DATASET_REPORT_FILTERS = ("filters.reference_only=true",)
 
 RETRIES = 3
@@ -23,15 +23,15 @@ CHUNK_SIZE = 32 * 1024
 BACKOFF_FACTOR = 0.3
 
 VALID_FASTA_EXTS = (".fna", ".fa", ".fasta")
-VALID_GFF_EXTS = (".gff", ".gff3", ".gtf")
+VALID_ANNOTATION_EXTS = (".gff", ".gff3", ".gtf")
 
 
 def run_get_genomes(args: argparse.Namespace) -> int:
     try:
         taxon_path = _get_genomes_by_taxon(
             args.taxon,
-            args.api_key,
             args.output_dir,
+            args.api_key,
             args.max_genomes,
             args.force,
         )
@@ -47,9 +47,10 @@ def add_get_args(parser: argparse.ArgumentParser, standalone: bool = True) -> No
     """Adds command-line arguments for the `get` command to the given parser.
 
     Args:
-        parser (argparse.ArgumentParser): The argument parser to which the arguments will be added.
-        standalone (bool): Whether to include standalone execution arguments. Defaults to True.
+        parser: The argument parser to add the arguments to.
+        standalone: Includes standalone execution arguments if True. Default: True.
     """
+
     parser.add_argument(
         "taxon", help="Taxon name (e.g., 'Arabidopsis' or 'Arabidopsis thaliana')."
     )
@@ -81,8 +82,9 @@ def add_get_args(parser: argparse.ArgumentParser, standalone: bool = True) -> No
 
 def _get_args() -> argparse.Namespace:
     """Gets arguments for standalone script execution."""
+
     parser = argparse.ArgumentParser(
-        description="Gets FASTA and GFF files for the given taxon using the Genbank API"
+        description="Gets FASTA and annotation files for the given taxon using the NCBI Datasets API"
     )
     add_get_args(parser, standalone=True)
     return parser.parse_args()
@@ -90,8 +92,8 @@ def _get_args() -> argparse.Namespace:
 
 def _get_genomes_by_taxon(
     taxon: str,
-    api_key: str,
     output_dir: str,
+    api_key: Optional[str] = None,
     max_genomes: Optional[int] = None,
     force: bool = False,
 ) -> str:
@@ -101,26 +103,27 @@ def _get_genomes_by_taxon(
 
     session = _build_session()
     try:
-        taxon = taxon.strip()  # TODO: should clean args in get args function
-        report_url = f"{TAXON_ENDPOINT}/{requests.utils.quote(taxon)}/dataset_report?{','.join(DATASET_REPORT_FILTERS)}"
-        reports = _fetch_all_pages(session, report_url, api_key, max_genomes)
+        taxon = taxon.lower().strip()  # TODO: clean args in get args function instead
+        
+        dataset_report_url = f"{TAXON_BASE_URL}/{quote(taxon)}/dataset_report?{','.join(DATASET_REPORT_FILTERS)}"
+        dataset_reports = _fetch_all_pages(session, dataset_report_url, api_key, max_genomes)
 
-        if not reports:
+        if not dataset_reports:
             raise Exception(f"No reference genomes found for taxon '{taxon}'")
 
-        _print_found_genomes(reports)
+        _print_found_genomes(dataset_reports)
 
-        num_genomes = len(reports)
-        taxon_dir_name = reports[0].get("organism").get("organism_name")
+        num_genomes = len(dataset_reports)
+        taxon_dir_name = dataset_reports[0].get("organism").get("organism_name")
         if num_genomes > 1:
-            taxon_dir_name = taxon_dir_name.split(" ")[0]  # use genus for dir name
+            taxon_dir_name = taxon_dir_name.split(" ")[0] # use genus for dir name
         taxon_dir_name = taxon_dir_name.lower().replace(" ", "_")
 
         genomes_dir_path = os.path.join(output_dir, "taxons", taxon_dir_name, "genomes")
         os.makedirs(genomes_dir_path, exist_ok=True)
 
         num_downloaded = 0
-        for i, report in enumerate(reports, start=1):
+        for i, report in enumerate(dataset_reports, start=1):
             accession = report.get("accession")
 
             existing_files = os.listdir(genomes_dir_path)
@@ -128,12 +131,12 @@ def _get_genomes_by_taxon(
                 f.startswith(accession) and f.endswith(VALID_FASTA_EXTS)
                 for f in existing_files
             )
-            has_gff = any(
-                f.startswith(accession) and f.endswith(VALID_GFF_EXTS)
+            has_annotation = any(
+                f.startswith(accession) and f.endswith(VALID_ANNOTATION_EXTS)
                 for f in existing_files
             )
 
-            if has_fasta and has_gff and not force:
+            if has_fasta and has_annotation and not force:
                 print(f"{accession} already exists at '{genomes_dir_path}', skipping")
                 continue
 
@@ -141,7 +144,26 @@ def _get_genomes_by_taxon(
             print(
                 f"\nDownloading genome {i}/{num_genomes}: {organism_name} ({accession})"
             )
-            download_url = f"{ACCESSION_ENDPOINT}/{accession}/download?include_annotation_type={','.join(GENOME_FILE_FILTERS)}"
+            
+            # check if GFF or GTF annotation is available. GFF preferred
+            download_summary_url = f"{ACCESSION_BASE_URL}/{quote(accession)}/download_summary"
+            download_summary = _api_request(session, download_summary_url, api_key)
+
+            available_files = download_summary["available_files"]
+            has_gff = available_files.get("genome_gff", False)
+            has_gtf = available_files.get("genome_gtf", False)
+
+            if not has_gff and not has_gtf:
+                print(f"{accession} has no annotation available, skipping")
+                continue
+
+            files_to_request = ["GENOME_FASTA"]
+            if has_gff:
+                files_to_request.append("GENOME_GFF")
+            else:
+                files_to_request.append("GENOME_GTF")
+
+            download_url = f"{ACCESSION_BASE_URL}/{quote(accession)}/download?include_annotation_type={','.join(files_to_request)}"
             _download_and_extract(
                 session, download_url, api_key, genomes_dir_path, accession
             )
@@ -181,7 +203,7 @@ def _fetch_all_pages(
 
     while True:
         if next_page_token:
-            url = f"{base_url}&page_token={requests.utils.quote(next_page_token)}"
+            url = f"{base_url}&page_token={quote(next_page_token)}"
         else:
             url = base_url
 
@@ -253,6 +275,7 @@ def _build_session() -> requests.Session:
     Retries restricted to GET
     Caller responsible for calling session.close()
     """
+
     s = requests.Session()
 
     s.headers.update({"Accept": "application/zip, application/octet-stream, */*"})
@@ -285,7 +308,7 @@ def _build_session() -> requests.Session:
     return s
 
 
-def _api_request(session: requests.Session, url: str, api_key: str) -> dict:
+def _api_request(session: requests.Session, url: str, api_key: Optional[str] = None) -> dict:
     headers = {"Accept": "application/json"}
     if api_key:
         headers["api-key"] = api_key
@@ -308,6 +331,7 @@ def _download_and_extract(
     Stream-download the zip at `url` into a temp file, then open it with zipfile.ZipFile
     and extract relevant files to `out_dir` with filenames prefixed by `accession`.
     """
+
     headers = {}
     if api_key:
         headers["api-key"] = api_key
@@ -330,7 +354,7 @@ def _download_and_extract(
                         f.write(chunk)
 
             # open zipfile from disk
-            relevant_exts = VALID_FASTA_EXTS + VALID_GFF_EXTS
+            relevant_exts = VALID_FASTA_EXTS + VALID_ANNOTATION_EXTS
             with zipfile.ZipFile(tmp_zip, "r") as z:
                 for member in z.infolist():
                     filename = os.path.basename(member.filename)

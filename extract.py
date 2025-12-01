@@ -11,7 +11,7 @@ import pyfaidx  # https://anaconda.org/bioconda/pyfaidx
 import gffutils  # https://anaconda.org/bioconda/gffutils
 
 # Internal modules
-from get_genomes import VALID_FASTA_EXTS, VALID_GFF_EXTS
+from get_genomes import VALID_FASTA_EXTS, VALID_ANNOTATION_EXTS
 
 # UTR refers to 3'UTR unless otherwise specified
 
@@ -22,12 +22,11 @@ _worker_args = None
 def run_extraction(args: argparse.Namespace) -> int:
     try:
         file_pairs = _find_files(args.input_path)
-        tasks = [(file_pair[0], file_pair[1]) for file_pair in file_pairs]
 
         # process each genome in parallel
         # Use initializer to set shared cli args for each worker
         with Pool(initializer=_init_worker, initargs=(args,)) as pool:
-            pool.map(_worker, tasks)
+            pool.map(_worker, file_pairs)
 
         return 0
     except Exception as e:
@@ -372,7 +371,7 @@ def _find_files(dir: str) -> list[tuple[str, str]]:
 
         if ext in VALID_FASTA_EXTS:
             files_by_basename[basename]["fasta"] = os.path.join(dir, filename)
-        elif ext in VALID_GFF_EXTS:
+        elif ext in VALID_ANNOTATION_EXTS:
             files_by_basename[basename]["gff"] = os.path.join(dir, filename)
 
     file_pairs = []
@@ -393,30 +392,33 @@ def _find_files(dir: str) -> list[tuple[str, str]]:
     return file_pairs
 
 
-def _create_gff_db(gff_fpath: str, db_fpath: str) -> gffutils.FeatureDB:
+def _create_gff_db(annotation_fpath: str, db_fpath: str) -> gffutils.FeatureDB:
     """
-    Creates a gffutils FeatureDB from the given GFF file if it does not already exist.
+    Creates a gffutils FeatureDB from the given annotation file if it does not already exist.
 
     Args:
-        gff_fpath: Filepath to the input GFF file.
+        annotation_fpath: Filepath to the input annotation file.
         db_fpath: Filepath to the output database file.
 
     Returns:
-        The created FeatureDB object.
+        A gffutils.FeatureDB object.
     """
-    assert os.path.isfile(gff_fpath), f"GFF file '{gff_fpath}' does not exist."
+    assert os.path.isfile(annotation_fpath), f"'{annotation_fpath}' does not exist."
 
     if not os.path.isfile(db_fpath):
-        print(f"Creating GFF database at '{db_fpath}'")
+        print(f"Creating FeatureDB at '{db_fpath}'")
         gffutils.create_db(
-            gff_fpath,
+            annotation_fpath,
             dbfn=db_fpath,
             keep_order=True,
             merge_strategy="create_unique",
             sort_attribute_values=True,
+            disable_infer_transcripts=True,
+            disable_infer_genes=True,
         )
+        print(f"FeatureDB created at '{db_fpath}'")
     else:
-        print(f"Using existing GFF database at '{db_fpath}'")
+        print(f"Using existing FeatureDB at '{db_fpath}'")
 
     return gffutils.FeatureDB(db_fpath)
 
