@@ -64,24 +64,24 @@ def add_extract_args(parser: argparse.ArgumentParser, standalone: bool = True) -
         action="store_true",
         help="Output raw DNA sequences instead of transcribed RNA.",
     )
-    parser.add_argument(
-        "--filter-consecutive-a",
-        type=int,
-        default=6,
-        help="Filter out terminators with this many consecutive 'A's in the first <filter-window-size> downstream nts (default: 6). Set to 0 to disable.",
-    )
-    parser.add_argument(
-        "--filter-window-a",
-        type=int,
-        default=8,
-        help="Filter out terminators with this many 'A's in the first <filter-window-size> downstream nts (default: 8). Set to 0 to disable.",
-    )
-    parser.add_argument(
-        "--filter-window-size",
-        type=int,
-        default=10,
-        help="Number of downstream nts to check for internal priming artifacts (default: 10).",
-    )
+    # parser.add_argument(
+    #     "--filter-consecutive-a",
+    #     type=int,
+    #     default=6,
+    #     help="Filter out terminators with this many consecutive 'A's in the first <filter-window-size> downstream nts (default: 6). Set to 0 to disable.",
+    # )
+    # parser.add_argument(
+    #     "--filter-window-a",
+    #     type=int,
+    #     default=8,
+    #     help="Filter out terminators with this many 'A's in the first <filter-window-size> downstream nts (default: 8). Set to 0 to disable.",
+    # )
+    # parser.add_argument(
+    #     "--filter-window-size",
+    #     type=int,
+    #     default=10,
+    #     help="Number of downstream nts to check for internal priming artifacts (default: 10).",
+    # )
     parser.add_argument(
         "-d",
         "--downstream-nts",
@@ -117,41 +117,41 @@ def _get_args() -> argparse.Namespace:
     return args
 
 
-def _is_internal_priming_artifact(
-    sequence: str, consecutive_a: int = 6, total_a: int = 8, window_size: int = 10
-) -> bool:
-    """
-    Checks if the given sequence is likely to be an internal priming artifact.
-    Methodology based on Beaudong et al. DOI: 10.1101/gr.10.7.1001
+# def _is_internal_priming_artifact(
+#     sequence: str, consecutive_a: int = 6, total_a: int = 8, window_size: int = 10
+# ) -> bool:
+#     """
+#     Checks if the given sequence is likely to be an internal priming artifact.
+#     Methodology based on Beaudong et al. DOI: 10.1101/gr.10.7.1001
 
-    Args:
-        sequence: The sequence to check.
-        consecutive_a: The number of consecutive 'A's to classify sequence as an artifact (default: 6).
-        total_a: The total number of 'A's in the window to classify sequence as an artifact (default: 8).
-        window_size: The number of nucleotides to check from the start of the sequence (default: 10).
+#     Args:
+#         sequence: The sequence to check.
+#         consecutive_a: The number of consecutive 'A's to classify sequence as an artifact (default: 6).
+#         total_a: The total number of 'A's in the window to classify sequence as an artifact (default: 8).
+#         window_size: The number of nucleotides to check from the start of the sequence (default: 10).
 
-    Returns:
-        bool: True if the sequence is an internal priming artifact, False otherwise.
-    """
-    assert (
-        len(sequence) >= window_size
-    ), "Downstream sequence length must be greater than or equal to window size."
-    assert consecutive_a >= 0, "Filter for consecutive A's must be non-negative."
-    assert total_a >= 0, "Filter for total A's in window must be non-negative."
-    assert window_size > 0, "Window size must be greater than 0."
+#     Returns:
+#         bool: True if the sequence is an internal priming artifact, False otherwise.
+#     """
+#     assert (
+#         len(sequence) >= window_size
+#     ), "Downstream sequence length must be greater than or equal to window size."
+#     assert consecutive_a >= 0, "Filter for consecutive A's must be non-negative."
+#     assert total_a >= 0, "Filter for total A's in window must be non-negative."
+#     assert window_size > 0, "Window size must be greater than 0."
 
-    if consecutive_a == 0 and total_a == 0:
-        return False
+#     if consecutive_a == 0 and total_a == 0:
+#         return False
 
-    region_to_check = sequence[:window_size].upper()
+#     region_to_check = sequence[:window_size].upper()
 
-    if consecutive_a > 0 and "A" * consecutive_a in region_to_check:
-        return True
+#     if consecutive_a > 0 and "A" * consecutive_a in region_to_check:
+#         return True
 
-    if total_a > 0 and region_to_check.count("A") >= total_a:
-        return True
+#     if total_a > 0 and region_to_check.count("A") >= total_a:
+#         return True
 
-    return False
+#     return False
 
 
 def _extract_terminator(
@@ -232,17 +232,17 @@ def _filter_sequence(term_seq: str, args: argparse.Namespace) -> bool:
     if args.raw_dna:
         return True
 
-    final_downstream_seq = term_seq[-args.downstream_nts :]
-    if len(final_downstream_seq) < args.filter_window_size:
-        return False
+    # final_downstream_seq = term_seq[-args.downstream_nts :]
+    # if len(final_downstream_seq) < args.filter_window_size:
+    #     return False
 
-    if _is_internal_priming_artifact(
-        final_downstream_seq,
-        args.filter_consecutive_a,
-        args.filter_window_a,
-        args.filter_window_size,
-    ):
-        return False
+    # if _is_internal_priming_artifact(
+    #     final_downstream_seq,
+    #     args.filter_consecutive_a,
+    #     args.filter_window_a,
+    #     args.filter_window_size,
+    # ):
+    #     return False
 
     return True
 
@@ -310,7 +310,25 @@ def _extract_all_terminators(
     output_records = []
     skipped_count = 0
 
-    for tscript in db.features_of_type("mRNA", order_by="start"):
+    transcript_labels = ("mRNA", "transcript") # GTF uses "transcript", GFF uses "mRNA"
+    transcripts = []
+    for t_label in transcript_labels:
+        try:
+            transcripts = db.features_of_type(t_label, order_by="start")
+            if transcripts: #TODO fix this check without consuming the generator
+                print(f"Found transcripts with label '{t_label}'")
+                break
+        except:
+            continue
+
+    if not transcripts:
+        print(
+            f"WARNING: No transcripts found with labels {transcript_labels} in '{gff_fpath}', skipping",
+            file=sys.stderr,
+        )
+        return
+
+    for tscript in transcripts:
         record = _process_transcript(tscript, db, fasta, args)
         if record:
             output_records.append(record)

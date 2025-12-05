@@ -16,15 +16,15 @@ from plots import plot_signal_distribution
 
 
 # TODO: add more visualisations, like Loke Figure 1C, 1D and Figure 3.
-# TODO: add metrics to measure conservation
+# TODO: add metrics to measure conservation - % occurance
 # TODO: add feature to identify unique signals in a target gene. Compare gene terminator vs rest of genome vs whole genus
 # TODO: replace delta score with more robust method of filtering noise
-# TODO: Are internal priming artefacts relevant for raw genome sequences (not using RNA transcripts as in the Loke paper)?
 # TODO: Filter in one place - include all terminators, and then skip in analysis?
-# TODO: try to identify relationship between patterns in terminator and mRNA stability (half-life)
 # TODO: validate args comprehensively and in full pipeline as well as standalone
 # TODO: parallelise analysis (currently only extract is parallelised?)
 # TODO: terminate gracefully
+# TODO: generalise CE and NUE as 'analysis windows'
+# TODO: have analysis table output to file by default instead of console
 
 # Coordinates: -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 
