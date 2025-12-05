@@ -36,6 +36,7 @@ def run_extraction(args: argparse.Namespace) -> int:
 
 def _init_worker(args: argparse.Namespace) -> None:
     """Initialises worker process with shared cli args."""
+
     global _worker_args
     _worker_args = args
 
@@ -47,6 +48,7 @@ def _worker(args: tuple) -> None:
     Args:
         args: A tuple containing (fasta_fpath, gff_fpath).
     """
+
     fasta_fpath, gff_fpath = args
     _extract_all_terminators(fasta_fpath, gff_fpath, _worker_args)
 
@@ -58,30 +60,31 @@ def add_extract_args(parser: argparse.ArgumentParser, standalone: bool = True) -
         parser (argparse.ArgumentParser): The argument parser to which the arguments will be added.
         standalone (bool): Whether to include standalone execution arguments. Defaults to True.
     """
+
     parser.add_argument(
         "-r",
         "--raw-dna",
         action="store_true",
         help="Output raw DNA sequences instead of transcribed RNA.",
     )
-    # parser.add_argument(
-    #     "--filter-consecutive-a",
-    #     type=int,
-    #     default=6,
-    #     help="Filter out terminators with this many consecutive 'A's in the first <filter-window-size> downstream nts (default: 6). Set to 0 to disable.",
-    # )
-    # parser.add_argument(
-    #     "--filter-window-a",
-    #     type=int,
-    #     default=8,
-    #     help="Filter out terminators with this many 'A's in the first <filter-window-size> downstream nts (default: 8). Set to 0 to disable.",
-    # )
-    # parser.add_argument(
-    #     "--filter-window-size",
-    #     type=int,
-    #     default=10,
-    #     help="Number of downstream nts to check for internal priming artifacts (default: 10).",
-    # )
+    parser.add_argument(
+        "--filter-consecutive-a",
+        type=int,
+        default=6,
+        help="Filter out terminators with this many consecutive 'A's in the first <filter-window-size> downstream nts (default: 6). Set to 0 to disable.",
+    )
+    parser.add_argument(
+        "--filter-window-a",
+        type=int,
+        default=8,
+        help="Filter out terminators with this many 'A's in the first <filter-window-size> downstream nts (default: 8). Set to 0 to disable.",
+    )
+    parser.add_argument(
+        "--filter-window-size",
+        type=int,
+        default=10,
+        help="Number of downstream nts to check for internal priming artifacts (default: 10).",
+    )
     parser.add_argument(
         "-d",
         "--downstream-nts",
@@ -117,41 +120,42 @@ def _get_args() -> argparse.Namespace:
     return args
 
 
-# def _is_internal_priming_artifact(
-#     sequence: str, consecutive_a: int = 6, total_a: int = 8, window_size: int = 10
-# ) -> bool:
-#     """
-#     Checks if the given sequence is likely to be an internal priming artifact.
-#     Methodology based on Beaudong et al. DOI: 10.1101/gr.10.7.1001
+def _is_internal_priming_artifact(
+    downstream_sequence: str, consecutive_a: int, total_a: int, window_size: int
+) -> bool:
+    """
+    Checks if the given downstream sequence indicates an internal priming artifact.
+    Methodology based on Beaudong et al. DOI: 10.1101/gr.10.7.1001
 
-#     Args:
-#         sequence: The sequence to check.
-#         consecutive_a: The number of consecutive 'A's to classify sequence as an artifact (default: 6).
-#         total_a: The total number of 'A's in the window to classify sequence as an artifact (default: 8).
-#         window_size: The number of nucleotides to check from the start of the sequence (default: 10).
+    Args:
+        downstream_sequence: The downstream sequence to check.
+        consecutive_a: The number of consecutive 'A's to classify sequence as an artifact.
+        total_a: The total number of 'A's in the window to classify sequence as an artifact.
+        window_size: The number of nucleotides to check from the start of the sequence.
 
-#     Returns:
-#         bool: True if the sequence is an internal priming artifact, False otherwise.
-#     """
-#     assert (
-#         len(sequence) >= window_size
-#     ), "Downstream sequence length must be greater than or equal to window size."
-#     assert consecutive_a >= 0, "Filter for consecutive A's must be non-negative."
-#     assert total_a >= 0, "Filter for total A's in window must be non-negative."
-#     assert window_size > 0, "Window size must be greater than 0."
+    Returns:
+        bool: True if the sequence is an internal priming artifact, False otherwise.
+    """
 
-#     if consecutive_a == 0 and total_a == 0:
-#         return False
+    assert (
+        len(downstream_sequence) >= window_size
+    ), "Downstream sequence length must be greater than or equal to window size."
+    assert consecutive_a >= 0, "Filter for consecutive A's must be non-negative."
+    assert total_a >= 0, "Filter for total A's in window must be non-negative."
+    assert window_size > 0, "Window size must be greater than 0."
 
-#     region_to_check = sequence[:window_size].upper()
+    if consecutive_a == 0 and total_a == 0:
+        return False
 
-#     if consecutive_a > 0 and "A" * consecutive_a in region_to_check:
-#         return True
+    region_to_check = downstream_sequence[:window_size].upper()
 
-#     if total_a > 0 and region_to_check.count("A") >= total_a:
-#         return True
+    if consecutive_a > 0 and "A" * consecutive_a in region_to_check:
+        return True
 
-#     return False
+    if total_a > 0 and region_to_check.count("A") >= total_a:
+        return True
+
+    return False
 
 
 def _extract_terminator(
@@ -165,6 +169,7 @@ def _extract_terminator(
     Extracts the terminator sequence for a given transcript feature.
     Handles strand sense and reverse complementing.
     """
+
     # All coordinates 1-based until modified in slice operations
     # Python slices are 0-based, end-exclusive -> subtract 1 only for start coords
     utr_parts = []
@@ -212,7 +217,7 @@ def _extract_terminator(
     if downstream_start <= downstream_end:
         downstream_seq = fasta[tscript.chrom][downstream_start - 1 : downstream_end].seq
 
-    # Assemble final sequence
+    # assemble final sequence
     if tscript.strand == "+":
         term_seq = full_utr + downstream_seq  # 5' to 3'
     else:
@@ -229,20 +234,21 @@ def _filter_sequence(term_seq: str, args: argparse.Namespace) -> bool:
     Returns:
         bool: True if the sequence passes the filters, False otherwise.
     """
+
     if args.raw_dna:
         return True
 
-    # final_downstream_seq = term_seq[-args.downstream_nts :]
-    # if len(final_downstream_seq) < args.filter_window_size:
-    #     return False
+    final_downstream_seq = term_seq[-args.downstream_nts :]
+    if len(final_downstream_seq) < args.filter_window_size:
+        return False
 
-    # if _is_internal_priming_artifact(
-    #     final_downstream_seq,
-    #     args.filter_consecutive_a,
-    #     args.filter_window_a,
-    #     args.filter_window_size,
-    # ):
-    #     return False
+    if _is_internal_priming_artifact(
+        final_downstream_seq,
+        args.filter_consecutive_a,
+        args.filter_window_a,
+        args.filter_window_size,
+    ):
+        return False
 
     return True
 
@@ -254,6 +260,7 @@ def _process_transcript(
     args: argparse.Namespace,
 ) -> str | None:
     """Processes a single transcript feature to extract and format its terminator sequence."""
+
     try:
         cds_features = list(db.children(tscript, featuretype="CDS", order_by="start"))
         exon_features = list(db.children(tscript, featuretype="exon", order_by="start"))
@@ -277,27 +284,27 @@ def _process_transcript(
 
 
 def _extract_all_terminators(
-    fasta_fpath: str, gff_fpath: str, args: argparse.Namespace
+    fasta_fpath: str, annotation_fpath: str, args: argparse.Namespace
 ) -> None:
     """
     Extracts terminator sequences from the given fasta and gff files.
 
     Args:
         fasta_fpath: Filepath to the input FASTA file.
-        gff_fpath: Filepath to the input GFF file.
+        annotation_fpath: Filepath to the input annotation file.
         args: Parsed command-line arguments.
     """
+
     assert os.path.isfile(fasta_fpath), f"Fasta file '{fasta_fpath}' does not exist."
-    assert os.path.isfile(gff_fpath), f"GFF file '{gff_fpath}' does not exist."
+    assert os.path.isfile(annotation_fpath), f"Annotation file '{annotation_fpath}' does not exist."
 
     fname = os.path.basename(fasta_fpath).split(".")[0]
     print(f"Processing genome '{fname}'")
 
     db_dir = os.path.join(
-        "out", "gff_dbs"  # TODO: make this adapt to diff output folders
+        "out", "FeatureDBs"  # TODO: make this adapt to diff output folders
     )  # Allows reuse of DBs between different taxons
 
-    os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(db_dir, exist_ok=True)
 
     db_fpath = os.path.join(db_dir, f"{fname}.db")
@@ -306,42 +313,42 @@ def _extract_all_terminators(
     )
 
     fasta = pyfaidx.Fasta(fasta_fpath)
-    db = _create_gff_db(gff_fpath, db_fpath)
-    output_records = []
-    skipped_count = 0
+    db = _create_gff_db(annotation_fpath, db_fpath)
 
-    transcript_labels = ("mRNA", "transcript") # GTF uses "transcript", GFF uses "mRNA"
+    transcript_labels = ("mRNA", "transcript") # GFF uses "mRNA", GTF uses "transcript"
     transcripts = []
     for t_label in transcript_labels:
         try:
-            transcripts = db.features_of_type(t_label, order_by="start")
-            if transcripts: #TODO fix this check without consuming the generator
+            if db.count_features_of_type(t_label) > 0:
                 print(f"Found transcripts with label '{t_label}'")
+                transcripts = db.features_of_type(t_label, order_by="start")
                 break
         except:
             continue
 
     if not transcripts:
         print(
-            f"WARNING: No transcripts found with labels {transcript_labels} in '{gff_fpath}', skipping",
+            f"WARNING: No transcripts found with labels {transcript_labels} in '{annotation_fpath}', skipping",
             file=sys.stderr,
         )
         return
 
+    out_records = []
+    num_skipped = 0
     for tscript in transcripts:
         record = _process_transcript(tscript, db, fasta, args)
         if record:
-            output_records.append(record)
+            out_records.append(record)
         else:
-            skipped_count += 1
+            num_skipped += 1
 
     with open(terminators_fpath, "w") as out_f:
-        out_f.writelines(output_records)
+        out_f.writelines(out_records)
 
     print(
-        f"Extracted {len(output_records)} terminator sequences to '{terminators_fpath}'"
+        f"Extracted {len(out_records)} terminator sequences to '{terminators_fpath}'"
     )
-    print(f"skipped {skipped_count} transcripts")
+    print(f"skipped {num_skipped} transcripts")
 
 
 # --- HELPER FUNCTIONS ---
@@ -354,6 +361,7 @@ def _format_fasta_record(
     Returns:
         The formatted FASTA record.
     """
+
     display_id = tscript.id
     if "orig_protein_id" in tscript.attributes:
         raw_id = tscript.attributes["orig_protein_id"][0]
@@ -379,6 +387,7 @@ def _find_files(dir: str) -> list[tuple[str, str]]:
     Returns:
         A list of tuples, where each tuple is a pair of FASTA and GFF file paths.
     """
+
     assert os.path.isdir(dir), f"Folder '{dir}' does not exist or is not a directory."
 
     files_by_basename = defaultdict(dict)
@@ -421,6 +430,7 @@ def _create_gff_db(annotation_fpath: str, db_fpath: str) -> gffutils.FeatureDB:
     Returns:
         A gffutils.FeatureDB object.
     """
+    
     assert os.path.isfile(annotation_fpath), f"'{annotation_fpath}' does not exist."
 
     if not os.path.isfile(db_fpath):

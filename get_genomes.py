@@ -224,7 +224,7 @@ def _fetch_all_pages(
 
 def _print_found_genomes(reports: list) -> None:
     num_genomes = len(reports)
-    print(f"\nFound {num_genomes} reference genome{'s' if num_genomes != 1 else ''}:")
+    print(f"\nFound {num_genomes} reference genome/s:")
 
     # Prepare data and find max widths for column alignment
     header = {

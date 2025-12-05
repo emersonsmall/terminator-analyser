@@ -25,6 +25,8 @@ from plots import plot_signal_distribution
 # TODO: terminate gracefully
 # TODO: generalise CE and NUE as 'analysis windows'
 # TODO: have analysis table output to file by default instead of console
+# TODO: .gbff to .gtf or .gff ?
+# TODO: handle dots in accessions
 
 # Coordinates: -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 
@@ -52,6 +54,7 @@ def run_analysis(args: argparse.Namespace) -> int:
     Returns:
         int: Exit code (0 for success, 1 for failure).
     """
+
     try:
         # Find all fasta files
         fasta_files = []
@@ -143,9 +146,10 @@ def add_analyse_args(parser: argparse.ArgumentParser, standalone: bool = True) -
     """Adds command-line arguments for the `analyse` command to the given parser.
 
     Args:
-        parser (argparse.ArgumentParser): The argument parser to which the arguments will be added.
-        standalone (bool): Whether to include standalone execution arguments. Defaults to True.
+        parser: The argument parser to which the arguments will be added.
+        standalone: Whether to include standalone execution arguments. Defaults to True.
     """
+
     parser.add_argument(
         "-n",
         "--top-n",
@@ -197,6 +201,7 @@ def _get_args() -> argparse.Namespace:
     Returns:
         argparse.Namespace: Parsed command-line arguments.
     """
+
     parser = argparse.ArgumentParser(
         description="Analyses the NUE and CE regions of the given terminator sequences."
     )
@@ -225,15 +230,16 @@ def _count_kmers(
     If region_start and region_end are 0, counts k-mers across the whole sequence.
 
     Args:
-        sequences (list[str]): List of sequences to analyse.
-        region_start (int): Start position of the region (-1 is last nt of 3'UTR, +1 is first nt of downstream region).
-        region_end (int): End position of the region.
-        kmer_size (int): Size of the k-mers.
-        step_size (int): Step size for k-mer counting (1: overlapping k-mers. kmer_size: non-overlapping k-mers)
+        sequences: List of sequences to analyse.
+        region_start: Start position of the region (-1 is last nt of 3'UTR, +1 is first nt of downstream region).
+        region_end: End position of the region.
+        kmer_size: Size of the k-mers.
+        step_size: Step size for k-mer counting (1: overlapping k-mers. kmer_size: non-overlapping k-mers)
 
     Returns:
         dict: Dictionary of k-mer counts by position { kmer: { pos1: count, pos2: count } }.
     """
+
     assert isinstance(sequences, list) and all(
         isinstance(s, str) for s in sequences
     ), "Sequences must be a list of strings."
@@ -276,9 +282,10 @@ def _rank_kmers(kmer_counts: dict, top_n: int) -> list:
     Returns the top N k-mers with the highest delta.
 
     Args:
-        kmer_counts (dict): Dictionary of k-mer counts by position.
-        top_n (int): Number of top k-mers to return.
+        kmer_counts: Dictionary of k-mer counts by position.
+        top_n: Number of top k-mers to return.
     """
+
     assert isinstance(kmer_counts, dict)
     assert isinstance(top_n, int) and top_n > 0, "Top N must be a positive integer."
 
@@ -333,10 +340,11 @@ def _print_report(region_name: str, kmers: list, kmer_size: int) -> None:
     """Prints a formatted output report of top k-mers.
 
     Args:
-        region_name (str): Name of the region (e.g., "NUE" or "CE").
-        kmers (list): List of top k-mers with their statistics.
-        kmer_size (int): Size of the k-mers.
+        region_name: Name of the region (e.g., "NUE" or "CE").
+        kmers: List of top k-mers with their statistics.
+        kmer_size: Size of the k-mers.
     """
+
     print("\n" + "=" * 50)
     print(f"Top {len(kmers)} K-mers for {region_name}")
     print("=" * 50)
