@@ -18,15 +18,11 @@ from plots import plot_signal_distribution
 # TODO: add more visualisations, like Loke Figure 1C, 1D and Figure 3.
 # TODO: add metrics to measure conservation - % occurance
 # TODO: add feature to identify unique signals in a target gene. Compare gene terminator vs rest of genome vs whole genus
-# TODO: replace delta score with more robust method of filtering noise
 # TODO: Filter in one place - include all terminators, and then skip in analysis?
 # TODO: validate args comprehensively and in full pipeline as well as standalone
 # TODO: parallelise analysis (currently only extract is parallelised?)
 # TODO: terminate gracefully
 # TODO: generalise CE and NUE as 'analysis windows'
-# TODO: have analysis table output to file by default instead of console
-# TODO: .gbff to .gtf or .gff ?
-# TODO: handle dots in accessions
 
 # Coordinates: -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 
@@ -115,8 +111,8 @@ def run_analysis(args: argparse.Namespace) -> int:
         print(
             f"\n{skipped} of {num_terminators} ({(skipped/num_terminators * 100):.2f}%) terminator sequences skipped due to insufficient 3'UTR length"
         )
-        _print_report("CE", ranked_ce_kmers, args.kmer_size)
-        _print_report("NUE", ranked_nue_kmers, args.kmer_size)
+        _save_report("CE", ranked_ce_kmers, args.kmer_size, os.path.join(args.output_dir, "CE_report.txt"))
+        _save_report("NUE", ranked_nue_kmers, args.kmer_size, os.path.join(args.output_dir, "NUE_report.txt"))
 
         os.makedirs(args.output_dir, exist_ok=True)
 
@@ -336,8 +332,8 @@ def _rank_kmers(kmer_counts: dict, top_n: int) -> list:
 
 
 # --- HELPER FUNCTIONS ---
-def _print_report(region_name: str, kmers: list, kmer_size: int) -> None:
-    """Prints a formatted output report of top k-mers.
+def _save_report(region_name: str, kmers: list, kmer_size: int, out_fpath: str) -> None:
+    """Writes a formatted report to a file.
 
     Args:
         region_name: Name of the region (e.g., "NUE" or "CE").
@@ -345,18 +341,21 @@ def _print_report(region_name: str, kmers: list, kmer_size: int) -> None:
         kmer_size: Size of the k-mers.
     """
 
-    print("\n" + "=" * 50)
-    print(f"Top {len(kmers)} K-mers for {region_name}")
-    print("=" * 50)
-    print(
-        f"{'Rank':<5} | {'K-mer':<{kmer_size + 2}} | {'Delta':>8} | {'Peak Count':>10} | {'Peak Pos':>8}"
+    lines = []
+    lines.append("=" * 50 + "\n")
+    lines.append(f"Top {len(kmers)} K-mers for {region_name}\n")
+    lines.append("=" * 50 + "\n")
+    lines.append(
+        f"{'Rank':<5} | {'K-mer':<{kmer_size + 2}} | {'Delta':>8} | {'Peak Count':>10} | {'Peak Pos':>8}\n"
     )
-    print("-" * 50)
-    for i, item in enumerate(kmers):
-        rank = i + 1
-        print(
-            f"{rank:<5} | {item['kmer']:<{kmer_size + 2}} | {item['delta']:>8.1f} | {item['peak_count']:>10,} | {item['peak_pos']:>8}"
+    lines.append("-" * 50 + "\n")
+    for i, item in enumerate(kmers, start=1):
+        lines.append(
+            f"{i:<5} | {item['kmer']:<{kmer_size + 2}} | {item['delta']:>8.1f} | {item['peak_count']:>10,} | {item['peak_pos']:>8}\n"
         )
+
+    with open(out_fpath, "w") as f:
+        f.writelines(lines)
 
 
 # --- STANDALONE EXECUTION ---

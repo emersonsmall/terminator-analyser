@@ -49,8 +49,8 @@ def _worker(args: tuple) -> None:
         args: A tuple containing (fasta_fpath, gff_fpath).
     """
 
-    fasta_fpath, gff_fpath = args
-    _extract_all_terminators(fasta_fpath, gff_fpath, _worker_args)
+    fasta_fpath, annotation_fpath = args
+    _extract_all_terminators(fasta_fpath, annotation_fpath, _worker_args)
 
 
 def add_extract_args(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
@@ -298,16 +298,18 @@ def _extract_all_terminators(
     assert os.path.isfile(fasta_fpath), f"Fasta file '{fasta_fpath}' does not exist."
     assert os.path.isfile(annotation_fpath), f"Annotation file '{annotation_fpath}' does not exist."
 
-    fname = os.path.basename(fasta_fpath).split(".")[0]
+    base = os.path.basename(fasta_fpath)
+    fname = os.path.splitext(base)[0]
     print(f"Processing genome '{fname}'")
 
     db_dir = os.path.join(
         "out", "FeatureDBs"  # TODO: make this adapt to diff output folders
     )  # Allows reuse of DBs between different taxons
-
     os.makedirs(db_dir, exist_ok=True)
+    os.makedirs(args.output_dir, exist_ok=True)
 
     db_fpath = os.path.join(db_dir, f"{fname}.db")
+    
     terminators_fpath = os.path.join(
         args.output_dir, f"{fname}{TERMINATOR_FILE_SUFFIX}"
     )
@@ -320,7 +322,6 @@ def _extract_all_terminators(
     for t_label in transcript_labels:
         try:
             if db.count_features_of_type(t_label) > 0:
-                print(f"Found transcripts with label '{t_label}'")
                 transcripts = db.features_of_type(t_label, order_by="start")
                 break
         except:

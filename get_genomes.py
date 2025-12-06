@@ -127,16 +127,16 @@ def _get_genomes_by_taxon(
             accession = report.get("accession")
 
             existing_files = os.listdir(genomes_dir_path)
-            has_fasta = any(
+            fasta_exists = any(
                 f.startswith(accession) and f.endswith(VALID_FASTA_EXTS)
                 for f in existing_files
             )
-            has_annotation = any(
+            annotation_exists = any(
                 f.startswith(accession) and f.endswith(VALID_ANNOTATION_EXTS)
                 for f in existing_files
             )
 
-            if has_fasta and has_annotation and not force:
+            if fasta_exists and annotation_exists and not force:
                 print(f"{accession} already exists at '{genomes_dir_path}', skipping")
                 continue
 
@@ -152,15 +152,16 @@ def _get_genomes_by_taxon(
             available_files = download_summary["available_files"]
             has_gff = available_files.get("genome_gff", False)
             has_gtf = available_files.get("genome_gtf", False)
+            has_annotation = has_gff or has_gtf
 
-            if not has_gff and not has_gtf:
+            if not has_annotation:
                 print(f"{accession} has no annotation available, skipping")
                 continue
 
             files_to_request = ["GENOME_FASTA"]
             if has_gff:
                 files_to_request.append("GENOME_GFF")
-            else:
+            elif has_gtf:
                 files_to_request.append("GENOME_GTF")
 
             download_url = f"{ACCESSION_BASE_URL}/{quote(accession)}/download?include_annotation_type={','.join(files_to_request)}"
@@ -168,7 +169,7 @@ def _get_genomes_by_taxon(
                 session, download_url, api_key, genomes_dir_path, accession
             )
             num_downloaded += 1
-
+        
         if num_downloaded > 0:
             print(f"\nDownloaded {num_downloaded} genome/s to: {genomes_dir_path}")
 
@@ -261,7 +262,6 @@ def _print_found_genomes(reports: list) -> None:
         f"{'-' * max_widths['accession']}"
     )
 
-    # Print the formatted report
     print(fmt_string.format(**header))
     print(separator)
     for row in data:
