@@ -104,9 +104,11 @@ def _get_genomes_by_taxon(
     session = _build_session()
     try:
         taxon = taxon.lower().strip()  # TODO: clean args in get args function instead
-        
+
         dataset_report_url = f"{TAXON_BASE_URL}/{quote(taxon)}/dataset_report?{','.join(DATASET_REPORT_FILTERS)}"
-        dataset_reports = _fetch_all_pages(session, dataset_report_url, api_key, max_genomes)
+        dataset_reports = _fetch_all_pages(
+            session, dataset_report_url, api_key, max_genomes
+        )
 
         if not dataset_reports:
             raise Exception(f"No reference genomes found for taxon '{taxon}'")
@@ -116,7 +118,7 @@ def _get_genomes_by_taxon(
         num_genomes = len(dataset_reports)
         taxon_dir_name = dataset_reports[0].get("organism").get("organism_name")
         if num_genomes > 1:
-            taxon_dir_name = taxon_dir_name.split(" ")[0] # use genus for dir name
+            taxon_dir_name = taxon_dir_name.split(" ")[0]  # use genus for dir name
         taxon_dir_name = taxon_dir_name.lower().replace(" ", "_")
 
         genomes_dir_path = os.path.join(output_dir, "taxons", taxon_dir_name, "genomes")
@@ -144,9 +146,11 @@ def _get_genomes_by_taxon(
             print(
                 f"\nDownloading genome {i}/{num_genomes}: {organism_name} ({accession})"
             )
-            
+
             # check if GFF or GTF annotation is available. GFF preferred
-            download_summary_url = f"{ACCESSION_BASE_URL}/{quote(accession)}/download_summary"
+            download_summary_url = (
+                f"{ACCESSION_BASE_URL}/{quote(accession)}/download_summary"
+            )
             download_summary = _api_request(session, download_summary_url, api_key)
 
             available_files = download_summary["available_files"]
@@ -169,7 +173,7 @@ def _get_genomes_by_taxon(
                 session, download_url, api_key, genomes_dir_path, accession
             )
             num_downloaded += 1
-        
+
         if num_downloaded > 0:
             print(f"\nDownloaded {num_downloaded} genome/s to: {genomes_dir_path}")
 
@@ -308,7 +312,9 @@ def _build_session() -> requests.Session:
     return s
 
 
-def _api_request(session: requests.Session, url: str, api_key: Optional[str] = None) -> dict:
+def _api_request(
+    session: requests.Session, url: str, api_key: Optional[str] = None
+) -> dict:
     headers = {"Accept": "application/json"}
     if api_key:
         headers["api-key"] = api_key

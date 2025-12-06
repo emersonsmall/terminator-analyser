@@ -111,8 +111,18 @@ def run_analysis(args: argparse.Namespace) -> int:
         print(
             f"\n{skipped} of {num_terminators} ({(skipped/num_terminators * 100):.2f}%) terminator sequences skipped due to insufficient 3'UTR length"
         )
-        _save_report("CE", ranked_ce_kmers, args.kmer_size, os.path.join(args.output_dir, "CE_report.txt"))
-        _save_report("NUE", ranked_nue_kmers, args.kmer_size, os.path.join(args.output_dir, "NUE_report.txt"))
+        _save_report(
+            "CE",
+            ranked_ce_kmers,
+            args.kmer_size,
+            os.path.join(args.output_dir, "CE_report.txt"),
+        )
+        _save_report(
+            "NUE",
+            ranked_nue_kmers,
+            args.kmer_size,
+            os.path.join(args.output_dir, "NUE_report.txt"),
+        )
 
         os.makedirs(args.output_dir, exist_ok=True)
 

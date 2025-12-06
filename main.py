@@ -14,7 +14,8 @@ def main() -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     get_parser = subparsers.add_parser(
-        "get", help="Get all reference genomes for a given taxon (genus or organism name)."
+        "get",
+        help="Get all reference genomes for a given taxon (genus or organism name).",
     )
     add_get_args(get_parser, standalone=True)
 

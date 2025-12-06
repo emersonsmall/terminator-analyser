@@ -296,7 +296,9 @@ def _extract_all_terminators(
     """
 
     assert os.path.isfile(fasta_fpath), f"Fasta file '{fasta_fpath}' does not exist."
-    assert os.path.isfile(annotation_fpath), f"Annotation file '{annotation_fpath}' does not exist."
+    assert os.path.isfile(
+        annotation_fpath
+    ), f"Annotation file '{annotation_fpath}' does not exist."
 
     base = os.path.basename(fasta_fpath)
     fname = os.path.splitext(base)[0]
@@ -309,7 +311,7 @@ def _extract_all_terminators(
     os.makedirs(args.output_dir, exist_ok=True)
 
     db_fpath = os.path.join(db_dir, f"{fname}.db")
-    
+
     terminators_fpath = os.path.join(
         args.output_dir, f"{fname}{TERMINATOR_FILE_SUFFIX}"
     )
@@ -317,7 +319,7 @@ def _extract_all_terminators(
     fasta = pyfaidx.Fasta(fasta_fpath)
     db = _create_gff_db(annotation_fpath, db_fpath)
 
-    transcript_labels = ("mRNA", "transcript") # GFF uses "mRNA", GTF uses "transcript"
+    transcript_labels = ("mRNA", "transcript")  # GFF uses "mRNA", GTF uses "transcript"
     transcripts = []
     for t_label in transcript_labels:
         try:
@@ -346,9 +348,7 @@ def _extract_all_terminators(
     with open(terminators_fpath, "w") as out_f:
         out_f.writelines(out_records)
 
-    print(
-        f"Extracted {len(out_records)} terminator sequences to '{terminators_fpath}'"
-    )
+    print(f"Extracted {len(out_records)} terminator sequences to '{terminators_fpath}'")
     print(f"skipped {num_skipped} transcripts")
 
 
@@ -431,7 +431,7 @@ def _create_gff_db(annotation_fpath: str, db_fpath: str) -> gffutils.FeatureDB:
     Returns:
         A gffutils.FeatureDB object.
     """
-    
+
     assert os.path.isfile(annotation_fpath), f"'{annotation_fpath}' does not exist."
 
     if not os.path.isfile(db_fpath):
