@@ -17,7 +17,7 @@ from plots import plot_signal_distribution
 
 
 # TODO: add more visualisations, like Loke Figure 1C, 1D and Figure 3.
-# TODO: add metrics to measure conservation - % occurance
+# TODO: add metrics to measure conservation - % occurance (where the top X patterns occur in the expected window from Loke: "AAUAAA appears in the expected window in 10% of terminators")
 # TODO: add feature to identify unique signals in a target gene. Compare gene terminator vs rest of genome vs whole genus
 # TODO: Filter in one place - include all terminators, and then skip in analysis?
 # TODO: validate args comprehensively and in full pipeline as well as standalone
