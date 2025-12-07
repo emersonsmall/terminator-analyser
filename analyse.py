@@ -3,9 +3,10 @@ import sys
 import os
 import argparse
 import glob
-from collections import defaultdict
 import heapq
 import statistics
+from multiprocessing import Pool
+from functools import partial
 
 # External libraries
 import pyfaidx
@@ -20,9 +21,8 @@ from plots import plot_signal_distribution
 # TODO: add feature to identify unique signals in a target gene. Compare gene terminator vs rest of genome vs whole genus
 # TODO: Filter in one place - include all terminators, and then skip in analysis?
 # TODO: validate args comprehensively and in full pipeline as well as standalone
-# TODO: parallelise analysis (currently only extract is parallelised?)
 # TODO: terminate gracefully
-# TODO: generalise CE and NUE as 'analysis windows'
+# TODO: generalise CE and NUE as 'analysis windows', with ability to specify multiple windows
 
 # Coordinates: -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 
@@ -38,7 +38,7 @@ PLOT_NUE_X_MIN = -35
 PLOT_NUE_X_MAX = -5
 PLOT_CE_X_MIN = -10
 PLOT_CE_X_MAX = 15
-SIGNALS_PLOT_FILENAME = "_signals_plot.png"
+PLOT_FILE_SUFFIX = "_signals_plot.png"
 
 
 def run_analysis(args: argparse.Namespace) -> int:
@@ -69,69 +69,51 @@ def run_analysis(args: argparse.Namespace) -> int:
             )
             return 1
 
-        terminators = []
-        skipped = 0
-        num_terminators = 0
+        # process each file in parallel
+        worker = partial(_process_terminator_fasta, args=args)
+        total_nue_counts = {}
+        total_ce_counts = {}
+        total_skipped = 0
+        total_terminators = 0
 
-        for file in fasta_files:
-            fa_records = pyfaidx.Fasta(file, as_raw=True)
-            for record in fa_records:
-                num_terminators += 1
+        with Pool() as pool:
+            for (
+                nue_counts,
+                ce_counts,
+                num_skipped,
+                num_terminators,
+            ) in pool.imap_unordered(worker, fasta_files):
+                _merge_counts(total_nue_counts, nue_counts)
+                _merge_counts(total_ce_counts, ce_counts)
+                total_skipped += num_skipped
+                total_terminators += num_terminators
 
-                seq = str(record).upper()
-                total_len = len(seq)
-                utr_len = total_len - args.downstream_nts
-
-                if utr_len < args.min_3utr_length:
-                    skipped += 1
-                    continue
-
-                terminators.append(seq)
-
-        nue_counts = _count_kmers(
-            terminators,
-            NUE_START,
-            NUE_END,
-            args.kmer_size,
-            args.downstream_nts,
-            args.step_size,
-        )
-        ce_counts = _count_kmers(
-            terminators,
-            CE_START,
-            CE_END,
-            args.kmer_size,
-            args.downstream_nts,
-            args.step_size,
-        )
-
-        ranked_nue_kmers = _rank_kmers(nue_counts, args.top_n)
-        ranked_ce_kmers = _rank_kmers(ce_counts, args.top_n)
+        ranked_nue_kmers = _rank_kmers(total_nue_counts, args.top_n)
+        ranked_ce_kmers = _rank_kmers(total_ce_counts, args.top_n)
 
         print(
-            f"\n{skipped} of {num_terminators} ({(skipped/num_terminators * 100):.2f}%) terminator sequences skipped due to insufficient 3'UTR length"
+            f"\n{total_skipped} of {total_terminators} ({(total_skipped/total_terminators * 100):.2f}%) terminators skipped"
         )
+
+        os.makedirs(args.output_dir, exist_ok=True)
+
         _save_report(
             "CE",
             ranked_ce_kmers,
-            args.kmer_size,
             os.path.join(args.output_dir, "CE_report.txt"),
         )
         _save_report(
             "NUE",
             ranked_nue_kmers,
-            args.kmer_size,
             os.path.join(args.output_dir, "NUE_report.txt"),
         )
 
-        os.makedirs(args.output_dir, exist_ok=True)
-
-        nue_plot_path = os.path.join(args.output_dir, "NUE" + SIGNALS_PLOT_FILENAME)
-        ce_plot_path = os.path.join(args.output_dir, "CE" + SIGNALS_PLOT_FILENAME)
+        nue_plot_path = os.path.join(args.output_dir, "NUE" + PLOT_FILE_SUFFIX)
+        ce_plot_path = os.path.join(args.output_dir, "CE" + PLOT_FILE_SUFFIX)
 
         plot_signal_distribution(
             ranked_nue_kmers,
-            nue_counts,
+            total_nue_counts,
             "NUE",
             PLOT_NUE_X_MIN,
             PLOT_NUE_X_MAX,
@@ -139,7 +121,12 @@ def run_analysis(args: argparse.Namespace) -> int:
         )
 
         plot_signal_distribution(
-            ranked_ce_kmers, ce_counts, "CE", PLOT_CE_X_MIN, PLOT_CE_X_MAX, ce_plot_path
+            ranked_ce_kmers,
+            total_ce_counts,
+            "CE",
+            PLOT_CE_X_MIN,
+            PLOT_CE_X_MAX,
+            ce_plot_path,
         )
 
         return 0
@@ -148,12 +135,14 @@ def run_analysis(args: argparse.Namespace) -> int:
         return 1
 
 
-def add_analyse_args(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
+def add_analyse_args(
+    parser: argparse.ArgumentParser, is_standalone: bool = True
+) -> None:
     """Adds command-line arguments for the `analyse` command to the given parser.
 
     Args:
         parser: The argument parser to which the arguments will be added.
-        standalone: Whether to include standalone execution arguments. Defaults to True.
+        is_standalone: Whether to include standalone execution arguments. Defaults to True.
     """
 
     parser.add_argument(
@@ -181,7 +170,7 @@ def add_analyse_args(parser: argparse.ArgumentParser, standalone: bool = True) -
         help="Step size for k-mer counting (default: 1).",
     )
 
-    if standalone:
+    if is_standalone:
         parser.add_argument(
             "input_path",
             help="Path to the terminator sequence FASTA file/s (filepath or directory path).",
@@ -189,8 +178,8 @@ def add_analyse_args(parser: argparse.ArgumentParser, standalone: bool = True) -
         parser.add_argument(
             "-o",
             "--output-dir",
-            default=os.path.join("out", "plots"),
-            help="Path to the output directory (default: ./out/plots).",
+            default=os.path.join("out", "analysis"),
+            help="Path to the output directory (default: ./out/analysis).",
         )
         parser.add_argument(
             "-d",
@@ -262,7 +251,7 @@ def _count_kmers(
         isinstance(step_size, int) and step_size > 0
     ), "Step size must be a positive integer."
 
-    positional_counts = defaultdict(lambda: defaultdict(int))
+    positional_counts = {}
 
     is_global = region_start == 0 and region_end == 0
 
@@ -277,23 +266,98 @@ def _count_kmers(
 
             if is_global or (region_start <= pos <= region_end):
                 kmer = seq[i : i + kmer_size]
+                if kmer not in positional_counts:
+                    positional_counts[kmer] = {}
+                if pos not in positional_counts[kmer]:
+                    positional_counts[kmer][pos] = 0
                 positional_counts[kmer][pos] += 1
 
     return positional_counts
 
 
-def _rank_kmers(kmer_counts: dict, top_n: int) -> list:
+def _process_terminator_fasta(fasta_fpath: str, args: argparse.Namespace) -> tuple:
+    """
+    Processes a single terminator FASTA file, counting kmers in NUE and CE regions.
+
+    Args:
+        fasta_fpath: Path to the FASTA file.
+        args: Parsed command-line arguments.
+
+    Returns:
+        A tuple containing (nue_counts, ce_counts, num_skipped, num_terminators)
+    """
+
+    terminators = []
+    num_skipped = 0
+    num_terminators = 0
+
+    fa_records = pyfaidx.Fasta(fasta_fpath, as_raw=True)
+    for record in fa_records:
+        num_terminators += 1
+
+        seq = str(record).upper()
+        total_len = len(seq)
+        utr_len = total_len - args.downstream_nts
+
+        if utr_len < args.min_3utr_length:
+            num_skipped += 1
+            continue
+
+        terminators.append(seq)
+
+    nue_counts = _count_kmers(
+        terminators,
+        NUE_START,
+        NUE_END,
+        args.kmer_size,
+        args.downstream_nts,
+        args.step_size,
+    )
+    ce_counts = _count_kmers(
+        terminators,
+        CE_START,
+        CE_END,
+        args.kmer_size,
+        args.downstream_nts,
+        args.step_size,
+    )
+
+    return nue_counts, ce_counts, num_skipped, num_terminators
+
+
+def _merge_counts(target: dict, src: dict) -> None:
+    """
+    Merges k-mer counts from source into target.
+
+    Args:
+        target: Target dictionary to merge into.
+        src: Source dictionary to merge from.
+    """
+
+    for kmer, pos_map in src.items():
+        if kmer not in target:
+            target[kmer] = {}
+        for pos, count in pos_map.items():
+            if pos not in target[kmer]:
+                target[kmer][pos] = 0
+            target[kmer][pos] += count
+
+
+def _rank_kmers(kmer_counts: dict, n: int) -> list:
     """
     Ranks k-mers by the difference between their peak and median counts.
     Returns the top N k-mers with the highest delta.
 
     Args:
         kmer_counts: Dictionary of k-mer counts by position.
-        top_n: Number of top k-mers to return.
+        n: Number of top k-mers to return.
+
+    Returns:
+        list: List of top N k-mers with their statistics.
     """
 
     assert isinstance(kmer_counts, dict)
-    assert isinstance(top_n, int) and top_n > 0, "Top N must be a positive integer."
+    assert isinstance(n, int) and n > 0, "Top N must be a positive integer."
 
     heap = []
     for kmer, positions in kmer_counts.items():
@@ -327,7 +391,7 @@ def _rank_kmers(kmer_counts: dict, top_n: int) -> list:
             },
         )
 
-        if len(heap) < top_n:
+        if len(heap) < n:
             heapq.heappush(heap, item)
         else:
             heapq.heappushpop(heap, item)
@@ -342,26 +406,28 @@ def _rank_kmers(kmer_counts: dict, top_n: int) -> list:
 
 
 # --- HELPER FUNCTIONS ---
-def _save_report(region_name: str, kmers: list, kmer_size: int, out_fpath: str) -> None:
+def _save_report(region_name: str, ranked_kmers: list, out_fpath: str) -> None:
     """Writes a formatted report to a file.
 
     Args:
         region_name: Name of the region (e.g., "NUE" or "CE").
-        kmers: List of top k-mers with their statistics.
-        kmer_size: Size of the k-mers.
+        ranked_kmers: List of top N k-mers with their statistics.
+        out_fpath: Path to the output file.
     """
 
     lines = []
     lines.append("=" * 50 + "\n")
-    lines.append(f"Top {len(kmers)} K-mers for {region_name}\n")
+    lines.append(f"Top {len(ranked_kmers)} K-mers for {region_name}\n")
     lines.append("=" * 50 + "\n")
+
+    kmer_size = len(ranked_kmers[0]["kmer"])
     lines.append(
-        f"{'Rank':<5} | {'K-mer':<{kmer_size + 2}} | {'Delta':>8} | {'Peak Count':>10} | {'Peak Pos':>8}\n"
+        f"{'K-mer':<{kmer_size + 2}} | {'Delta':>8} | {'Peak Count':>10} | {'Median Count':>8} | {'Peak Pos':>8}\n"
     )
     lines.append("-" * 50 + "\n")
-    for i, item in enumerate(kmers, start=1):
+    for _, item in enumerate(ranked_kmers):
         lines.append(
-            f"{i:<5} | {item['kmer']:<{kmer_size + 2}} | {item['delta']:>8.1f} | {item['peak_count']:>10,} | {item['peak_pos']:>8}\n"
+            f"{item['kmer']:<{kmer_size + 2}} | {item['delta']:>8.1f} | {item['peak_count']:>10,} | {item['median_count']:>8,} | {item['peak_pos']:>8}\n"
         )
 
     with open(out_fpath, "w") as f:

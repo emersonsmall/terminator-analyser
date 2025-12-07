@@ -17,17 +17,17 @@ def main() -> int:
         "get",
         help="Get all reference genomes for a given taxon (genus or organism name).",
     )
-    add_get_args(get_parser, standalone=True)
+    add_get_args(get_parser, is_standalone=True)
 
     extract_parser = subparsers.add_parser(
         "extract", help="Extract terminator sequences."
     )
-    add_extract_args(extract_parser, standalone=True)
+    add_extract_args(extract_parser, is_standalone=True)
 
     analyse_parser = subparsers.add_parser(
         "analyse", help="Analyse NUEs and CEs of terminator sequences."
     )
-    add_analyse_args(analyse_parser, standalone=True)
+    add_analyse_args(analyse_parser, is_standalone=True)
 
     full_parser = subparsers.add_parser(
         "full", help="Run the full pipeline: get, extract, and analyse."
@@ -40,9 +40,9 @@ def main() -> int:
     )
 
     # Add unique args from all steps
-    add_get_args(full_parser, standalone=False)
-    add_extract_args(full_parser, standalone=False)
-    add_analyse_args(full_parser, standalone=False)
+    add_get_args(full_parser, is_standalone=False)
+    add_extract_args(full_parser, is_standalone=False)
+    add_analyse_args(full_parser, is_standalone=False)
 
     args = parser.parse_args()
 
@@ -92,7 +92,7 @@ def main() -> int:
                     f"\nERROR: '{analyse_args.input_path}' not found.", file=sys.stderr
                 )
                 return 1
-            analyse_args.output_dir = os.path.join(taxon_dir, "plots")
+            analyse_args.output_dir = os.path.join(taxon_dir, "analysis")
 
             return run_analysis(analyse_args)
         else:

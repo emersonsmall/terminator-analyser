@@ -1,10 +1,11 @@
 # Built-in libraries
 import os
 import sys
-from multiprocessing import Pool
 import argparse
 import textwrap
 from collections import defaultdict
+from multiprocessing import Pool
+from functools import partial
 
 # External libraries
 import pyfaidx  # https://anaconda.org/bioconda/pyfaidx
@@ -16,7 +17,6 @@ from get_genomes import VALID_FASTA_EXTS, VALID_ANNOTATION_EXTS
 # UTR refers to 3'UTR unless otherwise specified
 
 TERMINATOR_FILE_SUFFIX = "_terminators.fa"
-_worker_args = None
 
 
 def run_extraction(args: argparse.Namespace) -> int:
@@ -24,9 +24,9 @@ def run_extraction(args: argparse.Namespace) -> int:
         file_pairs = _find_files(args.input_path)
 
         # process each genome in parallel
-        # Use initializer to set shared cli args for each worker
-        with Pool(initializer=_init_worker, initargs=(args,)) as pool:
-            pool.map(_worker, file_pairs)
+        worker = partial(_extract_all_terminators, args=args)
+        with Pool() as pool:
+            pool.map(worker, file_pairs)
 
         return 0
     except Exception as e:
@@ -34,31 +34,14 @@ def run_extraction(args: argparse.Namespace) -> int:
         return 1
 
 
-def _init_worker(args: argparse.Namespace) -> None:
-    """Initialises worker process with shared cli args."""
-
-    global _worker_args
-    _worker_args = args
-
-
-def _worker(args: tuple) -> None:
-    """
-    Extracts the terminator sequences of a single genome.
-
-    Args:
-        args: A tuple containing (fasta_fpath, gff_fpath).
-    """
-
-    fasta_fpath, annotation_fpath = args
-    _extract_all_terminators(fasta_fpath, annotation_fpath, _worker_args)
-
-
-def add_extract_args(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
+def add_extract_args(
+    parser: argparse.ArgumentParser, is_standalone: bool = True
+) -> None:
     """Adds command-line arguments for the `extract` command to the given parser.
 
     Args:
-        parser (argparse.ArgumentParser): The argument parser to which the arguments will be added.
-        standalone (bool): Whether to include standalone execution arguments. Defaults to True.
+        parser: The argument parser to which the arguments will be added.
+        standalone: Whether to include standalone execution arguments. Defaults to True.
     """
 
     parser.add_argument(
@@ -93,7 +76,7 @@ def add_extract_args(parser: argparse.ArgumentParser, standalone: bool = True) -
         help="Number of nucleotides downstream of the CS to extract (default: 50).",
     )
 
-    if standalone:
+    if is_standalone:
         parser.add_argument(
             "input_path",
             help="Path to the input folder containing FASTA and GFF files.",
@@ -283,17 +266,16 @@ def _process_transcript(
         return None
 
 
-def _extract_all_terminators(
-    fasta_fpath: str, annotation_fpath: str, args: argparse.Namespace
-) -> None:
+def _extract_all_terminators(file_pair: tuple, args: argparse.Namespace) -> None:
     """
     Extracts terminator sequences from the given fasta and gff files.
 
     Args:
-        fasta_fpath: Filepath to the input FASTA file.
-        annotation_fpath: Filepath to the input annotation file.
+        file_pair: A tuple containing (fasta_fpath, annotation_fpath).
         args: Parsed command-line arguments.
     """
+
+    fasta_fpath, annotation_fpath = file_pair
 
     assert os.path.isfile(fasta_fpath), f"Fasta file '{fasta_fpath}' does not exist."
     assert os.path.isfile(

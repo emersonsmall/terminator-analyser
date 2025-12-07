@@ -1,5 +1,4 @@
 # External libraries
-from cProfile import label
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
@@ -7,7 +6,6 @@ import matplotlib.pyplot as plt
 
 matplotlib.use("Agg")
 
-CS_POSITION = 1
 LINESTYLES = ["-", "--", "-.", ":"]
 MARKERS = ["o", "s", "^", "D", "v", "P", "*", "X"]
 NUM_LEGEND_COLS = 5
@@ -30,8 +28,8 @@ def plot_signal_distribution(
         region: Name of the region being analyzed.
         out_file: Path to save the output plot image.
     """
+
     tick_interval = 5
-    top_n = len(ranked_kmers)
 
     top_kmers = [item["kmer"] for item in ranked_kmers]
 
@@ -44,7 +42,7 @@ def plot_signal_distribution(
     df = df.reindex(sorted(df.index))
 
     # Create plot
-    fig, ax = plt.subplots(figsize=(12, 8))
+    _, ax = plt.subplots(figsize=(12, 8))
     for i, kmer in enumerate(df.columns):
         linestyle = LINESTYLES[i % len(LINESTYLES)]
         marker = MARKERS[i % len(MARKERS)]
@@ -61,7 +59,9 @@ def plot_signal_distribution(
     ax.set_xlabel("Position relative to CS", fontsize=12)
     ax.set_ylabel("Count", fontsize=12)
     ax.set_title(
-        f"Distribution of Top {top_n} Signals in {region}", fontsize=14, weight="bold"
+        f"Distribution of Top {len(ranked_kmers)} Signals in {region}",
+        fontsize=14,
+        weight="bold",
     )
     ax.grid(True, which="both", linestyle="--", linewidth=0.5)
     ax.set_ylim(bottom=0)
@@ -103,5 +103,5 @@ def plot_signal_distribution(
 
     # Save plot
     plt.savefig(out_file, dpi=300)
-    print(f"Plot saved to {out_file}")
+    print(f"Plot saved to '{out_file}'")
     plt.close()

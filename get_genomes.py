@@ -4,7 +4,6 @@ import sys
 import argparse
 import requests
 import zipfile
-from typing import Optional
 import tempfile
 import shutil
 from requests.adapters import HTTPAdapter
@@ -43,7 +42,7 @@ def run_get_genomes(args: argparse.Namespace) -> int:
         return 1
 
 
-def add_get_args(parser: argparse.ArgumentParser, standalone: bool = True) -> None:
+def add_get_args(parser: argparse.ArgumentParser, is_standalone: bool = True) -> None:
     """Adds command-line arguments for the `get` command to the given parser.
 
     Args:
@@ -52,7 +51,9 @@ def add_get_args(parser: argparse.ArgumentParser, standalone: bool = True) -> No
     """
 
     parser.add_argument(
-        "taxon", help="Taxon name (e.g., 'Arabidopsis' or 'Arabidopsis thaliana')."
+        "taxon", 
+        type=lambda s: s.lower().strip(),
+        help="Taxon name (e.g., 'Arabidopsis' or 'Arabidopsis thaliana')."
     )
     parser.add_argument(
         "--api-key",
@@ -71,7 +72,7 @@ def add_get_args(parser: argparse.ArgumentParser, standalone: bool = True) -> No
         help="Overwrite existing files with the same filenames.",
     )
 
-    if standalone:
+    if is_standalone:
         parser.add_argument(
             "-o",
             "--output-dir",
@@ -86,15 +87,15 @@ def _get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Gets FASTA and annotation files for the given taxon using the NCBI Datasets API"
     )
-    add_get_args(parser, standalone=True)
+    add_get_args(parser, is_standalone=True)
     return parser.parse_args()
 
 
 def _get_genomes_by_taxon(
     taxon: str,
     output_dir: str,
-    api_key: Optional[str] = None,
-    max_genomes: Optional[int] = None,
+    api_key: str | None = None,
+    max_genomes: int | None = None,
     force: bool = False,
 ) -> str:
     """
@@ -103,8 +104,6 @@ def _get_genomes_by_taxon(
 
     session = _build_session()
     try:
-        taxon = taxon.lower().strip()  # TODO: clean args in get args function instead
-
         dataset_report_url = f"{TAXON_BASE_URL}/{quote(taxon)}/dataset_report?{','.join(DATASET_REPORT_FILTERS)}"
         dataset_reports = _fetch_all_pages(
             session, dataset_report_url, api_key, max_genomes
@@ -113,6 +112,7 @@ def _get_genomes_by_taxon(
         if not dataset_reports:
             raise Exception(f"No reference genomes found for taxon '{taxon}'")
 
+        print(f"\nFound {len(dataset_reports)} reference genome/s for '{taxon}':")
         _print_found_genomes(dataset_reports)
 
         num_genomes = len(dataset_reports)
@@ -128,17 +128,7 @@ def _get_genomes_by_taxon(
         for i, report in enumerate(dataset_reports, start=1):
             accession = report.get("accession")
 
-            existing_files = os.listdir(genomes_dir_path)
-            fasta_exists = any(
-                f.startswith(accession) and f.endswith(VALID_FASTA_EXTS)
-                for f in existing_files
-            )
-            annotation_exists = any(
-                f.startswith(accession) and f.endswith(VALID_ANNOTATION_EXTS)
-                for f in existing_files
-            )
-
-            if fasta_exists and annotation_exists and not force:
+            if not force and _genome_files_exist(genomes_dir_path, accession):
                 print(f"{accession} already exists at '{genomes_dir_path}', skipping")
                 continue
 
@@ -156,9 +146,8 @@ def _get_genomes_by_taxon(
             available_files = download_summary["available_files"]
             has_gff = available_files.get("genome_gff", False)
             has_gtf = available_files.get("genome_gtf", False)
-            has_annotation = has_gff or has_gtf
 
-            if not has_annotation:
+            if not (has_gff or has_gtf):
                 print(f"{accession} has no annotation available, skipping")
                 continue
 
@@ -184,11 +173,29 @@ def _get_genomes_by_taxon(
 
 
 # --- HELPER FUNCTIONS ---
+def _genome_files_exist(dir_path: str, accession: str) -> bool:
+    """Checks if both FASTA and annotation files for the given accession."""
+
+    existing_files = os.listdir(dir_path)
+
+    has_fasta = any(
+        f.startswith(accession) and f.endswith(VALID_FASTA_EXTS)
+        for f in existing_files
+    )
+
+    has_annotation = any(
+        f.startswith(accession) and f.endswith(VALID_ANNOTATION_EXTS)
+        for f in existing_files
+    )
+
+    return has_fasta and has_annotation
+
+
 def _fetch_all_pages(
     session: requests.Session,
     base_url: str,
-    api_key: Optional[str] = None,
-    max_genomes: Optional[int] = None,
+    api_key: str | None = None,
+    max_genomes: int | None = None,
 ) -> list:
     """
     Fetches all pages of genomes reports for the NCBI Datasets API taxon report endpoint.
@@ -228,9 +235,6 @@ def _fetch_all_pages(
 
 
 def _print_found_genomes(reports: list) -> None:
-    num_genomes = len(reports)
-    print(f"\nFound {num_genomes} reference genome/s:")
-
     # Prepare data and find max widths for column alignment
     header = {
         "organism": "Organism name",
@@ -243,7 +247,7 @@ def _print_found_genomes(reports: list) -> None:
     for report in reports:
         organism_name = report.get("organism", {}).get("organism_name", "N/A")
         common_name = report.get("organism", {}).get("common_name", "N/A")
-        accession = report.get("accession", "N/A")
+        accession = report.get("accession")
 
         data.append(
             {"organism": organism_name, "common": common_name, "accession": accession}
@@ -308,18 +312,17 @@ def _build_session() -> requests.Session:
     s.mount("https://", adapter)
     s.mount("http://", adapter)
 
-    s.request_timeout = TIMEOUT_IN_SECONDS
     return s
 
 
 def _api_request(
-    session: requests.Session, url: str, api_key: Optional[str] = None
+    session: requests.Session, url: str, api_key: str | None = None
 ) -> dict:
     headers = {"Accept": "application/json"}
     if api_key:
         headers["api-key"] = api_key
     try:
-        res = session.get(url, headers=headers, timeout=session.request_timeout)
+        res = session.get(url, headers=headers, timeout=TIMEOUT_IN_SECONDS)
         res.raise_for_status()
         return res.json()
     except requests.RequestException as e:
@@ -347,7 +350,7 @@ def _download_and_extract(
     tmp_zip = None
     try:
         with session.get(
-            url, headers=headers, stream=True, timeout=session.request_timeout
+            url, headers=headers, stream=True, timeout=TIMEOUT_IN_SECONDS
         ) as res:
             res.raise_for_status()
             tmp_fd, tmp_zip = tempfile.mkstemp(
@@ -363,17 +366,16 @@ def _download_and_extract(
             relevant_exts = VALID_FASTA_EXTS + VALID_ANNOTATION_EXTS
             with zipfile.ZipFile(tmp_zip, "r") as z:
                 for member in z.infolist():
-                    filename = os.path.basename(member.filename)
-                    filename = filename.lower()
-                    _, ext = os.path.splitext(filename)
+                    base_name = os.path.basename(member.filename)
+                    _, ext = os.path.splitext(base_name.lower())
 
                     if ext not in relevant_exts:
                         continue
 
                     out_fname = f"{accession}{ext}"
+                    out_path = os.path.join(out_dir, out_fname)
 
                     # extract member to temp file then atomic replace
-                    out_path = os.path.join(out_dir, out_fname)
                     with z.open(member) as src:
                         with tempfile.NamedTemporaryFile(
                             delete=False, dir=out_dir
