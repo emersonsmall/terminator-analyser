@@ -247,8 +247,21 @@ def _process_transcript(
     try:
         cds_features = list(db.children(tscript, featuretype="CDS", order_by="start"))
         exon_features = list(db.children(tscript, featuretype="exon", order_by="start"))
+
+        # some GFF formats have CDS and exon features as children of gene, not transcript
+        if not cds_features or not exon_features:
+            try:
+                parent_gene = list(db.parents(tscript))[0]
+                if not cds_features:
+                    cds_features = list(db.children(parent_gene, featuretype="CDS", order_by="start"))
+                if not exon_features:
+                    exon_features = list(db.children(parent_gene, featuretype="exon", order_by="start"))
+            except (IndexError, StopIteration):
+                pass
+
         if not cds_features or not exon_features:
             return None
+
 
         term_seq = _extract_terminator(
             tscript, fasta, cds_features, exon_features, args.downstream_nts
