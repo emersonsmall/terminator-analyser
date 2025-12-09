@@ -23,7 +23,8 @@ from plots import plot_signal_distribution
 # TODO: validate args comprehensively and in full pipeline as well as standalone
 # TODO: terminate gracefully
 # TODO: generalise CE and NUE as 'analysis windows', with ability to specify multiple windows
-# TODO: optimise output folder structure, genome files currently duplicated
+# TODO: optimise output folder structure, allowing reuse of genome files between usages
+# TODO: add cli option to exclude an accession/genome
 
 # Coordinates: -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 
