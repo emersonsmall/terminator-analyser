@@ -17,14 +17,17 @@ from plots import plot_signal_distribution
 
 
 # TODO: add more visualisations, like Loke Figure 1C, 1D and Figure 3.
-# TODO: add metrics to measure conservation - % occurance (where the top X patterns occur in the expected window from Loke: "AAUAAA appears in the expected window in 10% of terminators")
+# TODO: add metrics to measure conservation - % occurance ("AAUAAA appears in the expected window in 10% of terminators") - is expected window full analysis window, expected region, or plot x axis limits?
 # TODO: add feature to identify unique signals in a target gene. Compare gene terminator vs rest of genome vs whole genus
 # TODO: Filter in one place - include all terminators, and then skip in analysis?
 # TODO: validate args comprehensively and in full pipeline as well as standalone
 # TODO: terminate gracefully
 # TODO: generalise CE and NUE as 'analysis windows', with ability to specify multiple windows
-# TODO: optimise output folder structure, allowing reuse of genome files between usages
+# TODO: optimise output folder structure, allowing reuse of genome files between usages (requires refactor of how extract/analyse get input files)
 # TODO: add cli option to exclude an accession/genome
+# TODO: format output report better, including % occurances, total transcripts, total terminators, 
+#       total skipped due to < min length, total skipped due to IPA, total skipped due no implied 3'UTR
+# TODO: re-run with CE_START = -15
 
 # Coordinates: -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 
@@ -33,7 +36,7 @@ NUE_START = -50
 NUE_END = -1
 CE_START = (
     -10
-)  # Loke paper uses -15, but -10 gives better results. AAUAAA and other NUE signals dominate if using -15
+)  # Loke et al. uses -15, but -10 gives better results. NUE signals dominate if using -15
 CE_END = 20
 
 PLOT_NUE_X_MIN = -35
