@@ -300,7 +300,7 @@ def _extract_all_terminators(file_pair: tuple, args: argparse.Namespace) -> None
     print(f"Processing genome '{fname}'")
 
     db_dir = os.path.join(
-        "out", "FeatureDBs"  # TODO: make this adapt to diff output folders
+        "out", "FeatureDBs"
     )  # Allows reuse of DBs between different taxons
     os.makedirs(db_dir, exist_ok=True)
     os.makedirs(args.output_dir, exist_ok=True)
