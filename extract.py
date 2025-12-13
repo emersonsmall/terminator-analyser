@@ -71,7 +71,7 @@ def add_extract_args(
     )
     parser.add_argument(
         "-d",
-        "--downstream-nts",
+        "--num-downstream-nts",
         type=int,
         default=50,
         help="Number of nucleotides downstream of the CS to extract (default: 50).",
@@ -148,7 +148,7 @@ def _extract_terminator(
     fasta: pyfaidx.Fasta,
     cds_features: list,
     exon_features: list,
-    downstream_nts: int,
+    num_downstream_nts: int,
 ) -> str | None:
     """
     Extracts the terminator sequence for a given transcript feature.
@@ -172,7 +172,7 @@ def _extract_terminator(
                 utr_parts.append(fasta[tscript.chrom][utr_start - 1 : utr_end].seq)
 
         downstream_start = tscript.end + 1
-        downstream_end = tscript.end + downstream_nts
+        downstream_end = tscript.end + num_downstream_nts
 
     elif tscript.strand == "-":
         cds_start = cds_features[0].start
@@ -184,7 +184,7 @@ def _extract_terminator(
                 utr_end = min(exon.end, cds_start - 1)
                 utr_parts.append(fasta[tscript.chrom][utr_start - 1 : utr_end].seq)
 
-        downstream_start = max(1, tscript.start - downstream_nts)
+        downstream_start = max(1, tscript.start - num_downstream_nts)
         downstream_end = tscript.start - 1
 
     else:
@@ -223,7 +223,7 @@ def _filter_sequence(term_seq: str, args: argparse.Namespace) -> bool:
     if args.raw_dna:
         return True
 
-    final_downstream_seq = term_seq[-args.downstream_nts :]
+    final_downstream_seq = term_seq[-args.num_downstream_nts :]
     if len(final_downstream_seq) < args.filter_window_size:
         return False
 
@@ -266,7 +266,7 @@ def _process_transcript(
 
 
         term_seq = _extract_terminator(
-            tscript, fasta, cds_features, exon_features, args.downstream_nts
+            tscript, fasta, cds_features, exon_features, args.num_downstream_nts
         )
 
         if not term_seq or not _filter_sequence(term_seq, args):
