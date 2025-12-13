@@ -16,22 +16,23 @@ from get_genomes import VALID_FASTA_EXTS, VALID_ANNOTATION_EXTS
 
 # UTR refers to 3'UTR unless otherwise specified
 
-TERMINATOR_FILE_SUFFIX = "_terminators.fa"
+
+def main() -> None:
+    run_extraction(_get_args())
 
 
-def run_extraction(args: argparse.Namespace) -> int:
+def run_extraction(args: argparse.Namespace) -> None:
     try:
-        file_pairs = _find_files(args.input_path)
+        included_accessions = getattr(args, "included_accessions", None)
+        file_pairs = _get_file_pairs(args.input_dir, included_accessions)
 
         # process each genome in parallel
         worker = partial(_extract_all_terminators, args=args)
         with Pool() as pool:
             pool.map(worker, file_pairs)
 
-        return 0
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
-        return 1
 
 
 def add_extract_args(
@@ -75,17 +76,16 @@ def add_extract_args(
         default=50,
         help="Number of nucleotides downstream of the CS to extract (default: 50).",
     )
+    parser.add_argument(
+        "--terminators-dir",
+        default=os.path.join("out", "terminators"),
+        help="Path to the output directory (default: './out/terminators').",
+    )
 
     if is_standalone:
         parser.add_argument(
-            "input_path",
+            "input_dir",
             help="Path to the input folder containing FASTA and GFF files.",
-        )
-        parser.add_argument(
-            "-o",
-            "--output-dir",
-            default=os.path.join("out", "terminators"),
-            help="Path to the output directory (default: './out/terminators').",
         )
 
 
@@ -96,10 +96,12 @@ def _get_args() -> argparse.Namespace:
     add_extract_args(parser)
 
     args = parser.parse_args()
-    if not os.path.isdir(args.input_path):
+
+    if not os.path.isdir(args.input_dir):
         parser.error(
-            f"Input directory '{args.input_path}' does not exist or is not a directory."
+            f"Input directory '{args.input_dir}' does not exist or is not a directory."
         )
+    
     return args
 
 
@@ -187,7 +189,7 @@ def _extract_terminator(
 
     else:
         print(
-            f"WARNING: unknown strand '{tscript.strand}' for feature '{tscript.id}'",
+            f"WARNING: unknown strand '{tscript.strand}' for feature '{tscript.id}', skipping",
             file=sys.stderr,
         )
         return None
@@ -296,20 +298,26 @@ def _extract_all_terminators(file_pair: tuple, args: argparse.Namespace) -> None
     ), f"Annotation file '{annotation_fpath}' does not exist."
 
     base = os.path.basename(fasta_fpath)
-    fname = os.path.splitext(base)[0]
-    print(f"Processing genome '{fname}'")
+    accession = os.path.splitext(base)[0]
+
+    os.makedirs(args.terminators_dir, exist_ok=True)
+    terminators_fpath = os.path.join(args.terminators_dir, f"{accession}.fa")
+
+    # skip if terminator fasta already exists (unless --force specified)
+    force = getattr(args, "force", False)
+    if not force and os.path.isfile(terminators_fpath):
+        print(f"{accession} terminators already exist at '{terminators_fpath}', skipping")
+        return
+
+    print(f"Processing genome {accession}")
 
     db_dir = os.path.join(
         "out", "FeatureDBs"
     )  # Allows reuse of DBs between different taxons
     os.makedirs(db_dir, exist_ok=True)
-    os.makedirs(args.output_dir, exist_ok=True)
 
-    db_fpath = os.path.join(db_dir, f"{fname}.db")
+    db_fpath = os.path.join(db_dir, f"{accession}.db")
 
-    terminators_fpath = os.path.join(
-        args.output_dir, f"{fname}{TERMINATOR_FILE_SUFFIX}"
-    )
 
     fasta = pyfaidx.Fasta(fasta_fpath)
     db = _create_gff_db(annotation_fpath, db_fpath)
@@ -373,7 +381,7 @@ def _format_fasta_record(
     return f"{header}\n{wrapped_seq}\n"
 
 
-def _find_files(dir: str) -> list[tuple[str, str]]:
+def _get_file_pairs(dir: str, included_accessions: set[str] | None) -> list[tuple[str, str]]:
     """
     Searches the given directory for matching pairs of FASTA and GFF files.
 
@@ -390,6 +398,11 @@ def _find_files(dir: str) -> list[tuple[str, str]]:
 
     for filename in os.listdir(dir):
         basename, ext = os.path.splitext(filename)
+
+        # if 'full' execution, filter by included accessions. Otherwise, include all valid files in dir
+        if included_accessions and basename not in included_accessions:
+            continue
+
         ext = ext.lower()
 
         if ext in VALID_FASTA_EXTS:
@@ -448,9 +461,5 @@ def _create_gff_db(annotation_fpath: str, db_fpath: str) -> gffutils.FeatureDB:
 
 
 # --- STANDALONE EXECUTION ---
-def main() -> int:
-    return run_extraction(_get_args())
-
-
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

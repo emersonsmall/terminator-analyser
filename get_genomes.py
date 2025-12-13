@@ -25,21 +25,30 @@ VALID_FASTA_EXTS = (".fna", ".fa", ".fasta")
 VALID_ANNOTATION_EXTS = (".gff", ".gff3", ".gtf")
 
 
-def run_get_genomes(args: argparse.Namespace) -> int:
+def main():
+    run_get_genomes(_get_args())
+
+
+def run_get_genomes(args: argparse.Namespace) -> set[str] | None:
     try:
-        taxon_path = _get_genomes_by_taxon(
+        return _get_genomes_by_taxon(
             args.taxon,
-            args.output_dir,
+            args.genomes_dir,
             args.api_key,
             args.max_genomes,
             args.force,
+            args.exclude_accessions
         )
 
-        args.input_path = taxon_path  # set input_path for downstream use
-        return 0
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
-        return 1
+
+
+def _exclude_accessions_arg(val: str) -> set[str]:
+    items = [v.strip() for v in val.split(",") if v.strip()]
+    if not items:
+        raise argparse.ArgumentTypeError("requires at least one accession")
+    return set(items)
 
 
 def add_get_args(parser: argparse.ArgumentParser, is_standalone: bool = True) -> None:
@@ -71,14 +80,17 @@ def add_get_args(parser: argparse.ArgumentParser, is_standalone: bool = True) ->
         action="store_true",
         help="Overwrite existing files with the same filenames.",
     )
-
-    if is_standalone:
-        parser.add_argument(
-            "-o",
-            "--output-dir",
-            default="out",
-            help="Path to the output directory (default: ./out).",
-        )
+    parser.add_argument(
+        "--exclude-accessions",
+        type=_exclude_accessions_arg,
+        default=set(),
+        help="Comma-separated list of accessions to exclude from download.",
+    )
+    parser.add_argument(
+        "--genomes-dir",
+        default=os.path.join("out", "genomes"),
+        help="Path to the output directory (default: ./out/genomes).",
+    )
 
 
 def _get_args() -> argparse.Namespace:
@@ -87,6 +99,7 @@ def _get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Gets FASTA and annotation files for the given taxon using the NCBI Datasets API"
     )
+
     add_get_args(parser, is_standalone=True)
     return parser.parse_args()
 
@@ -94,10 +107,11 @@ def _get_args() -> argparse.Namespace:
 def _get_genomes_by_taxon(
     taxon: str,
     output_dir: str,
-    api_key: str | None = None,
-    max_genomes: int | None = None,
-    force: bool = False,
-) -> str:
+    api_key: str | None,
+    max_genomes: int | None,
+    force: bool,
+    exclude_accessions: set[str]
+) -> set[str]:
     """
     Downloads and extracts all reference genomes for the given taxon.
     """
@@ -115,21 +129,22 @@ def _get_genomes_by_taxon(
         print(f"\nFound {len(dataset_reports)} reference genome/s for '{taxon}':")
         _print_found_genomes(dataset_reports)
 
+        os.makedirs(output_dir, exist_ok=True)
+
         num_genomes = len(dataset_reports)
-        taxon_dir_name = dataset_reports[0].get("organism").get("organism_name")
-        if num_genomes > 1:
-            taxon_dir_name = taxon_dir_name.split(" ")[0]  # use genus for dir name
-        taxon_dir_name = taxon_dir_name.lower().replace(" ", "_")
-
-        genomes_dir_path = os.path.join(output_dir, "taxons", taxon_dir_name, "genomes")
-        os.makedirs(genomes_dir_path, exist_ok=True)
-
+        included_accessions = set()
         num_downloaded = 0
+
         for i, report in enumerate(dataset_reports, start=1):
             accession = report.get("accession")
 
-            if not force and _genome_files_exist(genomes_dir_path, accession):
-                print(f"{accession} already exists at '{genomes_dir_path}', skipping")
+            if accession in exclude_accessions:
+                print(f"{accession} is in exclude list, skipping")
+                continue
+
+            if not force and _genome_files_exist(output_dir, accession):
+                print(f"{accession} already exists at '{output_dir}', skipping")
+                included_accessions.add(accession)
                 continue
 
             organism_name = report.get("organism").get("organism_name", "N/A")
@@ -154,41 +169,66 @@ def _get_genomes_by_taxon(
             files_to_request = ["GENOME_FASTA"]
             if has_gff:
                 files_to_request.append("GENOME_GFF")
-            elif has_gtf:
+            else:
                 files_to_request.append("GENOME_GTF")
 
             download_url = f"{ACCESSION_BASE_URL}/{quote(accession)}/download?include_annotation_type={','.join(files_to_request)}"
             _download_and_extract(
-                session, download_url, api_key, genomes_dir_path, accession
+                session, download_url, api_key, output_dir, accession
             )
             num_downloaded += 1
+            included_accessions.add(accession)
 
         if num_downloaded > 0:
-            print(f"\nDownloaded {num_downloaded} genome/s to: {genomes_dir_path}")
+            print(f"\nDownloaded {num_downloaded} genome/s to: '{output_dir}'")
 
-        return genomes_dir_path
+        return included_accessions
 
     finally:
         session.close()
 
 
-# --- HELPER FUNCTIONS ---
-def _genome_files_exist(dir_path: str, accession: str) -> bool:
-    """Checks if both FASTA and annotation files for the given accession."""
+# --- HELPERS ---
+def _build_session() -> requests.Session:
+    """
+    Return a requests.Session configured with retry logic.
+    Retries restricted to GET
+    Caller responsible for calling session.close()
+    """
 
-    existing_files = os.listdir(dir_path)
+    s = requests.Session()
 
-    has_fasta = any(
-        f.startswith(accession) and f.endswith(VALID_FASTA_EXTS)
-        for f in existing_files
+    s.headers.update({"Accept": "application/zip, application/octet-stream, */*"})
+
+    # only retry for GET
+    allowed = frozenset(["GET"])
+    retry = Retry(
+        total=RETRIES,
+        backoff_factor=BACKOFF_FACTOR,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=allowed,
+        raise_on_status=False,
     )
 
-    has_annotation = any(
-        f.startswith(accession) and f.endswith(VALID_ANNOTATION_EXTS)
-        for f in existing_files
-    )
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
 
-    return has_fasta and has_annotation
+    return s
+
+
+def _api_request(
+    session: requests.Session, url: str, api_key: str | None = None
+) -> dict:
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["api-key"] = api_key
+    try:
+        res = session.get(url, headers=headers, timeout=TIMEOUT_IN_SECONDS)
+        res.raise_for_status()
+        return res.json()
+    except requests.RequestException as e:
+        raise Exception(f"API request failed for URL {url}: {e}")
 
 
 def _fetch_all_pages(
@@ -232,101 +272,6 @@ def _fetch_all_pages(
             break
 
     return all_reports
-
-
-def _print_found_genomes(reports: list) -> None:
-    # Prepare data and find max widths for column alignment
-    header = {
-        "organism": "Organism name",
-        "common": "Common name",
-        "accession": "Accession",
-    }
-    data = []
-    max_widths = {key: len(value) for key, value in header.items()}
-
-    for report in reports:
-        organism_name = report.get("organism", {}).get("organism_name", "N/A")
-        common_name = report.get("organism", {}).get("common_name", "N/A")
-        accession = report.get("accession")
-
-        data.append(
-            {"organism": organism_name, "common": common_name, "accession": accession}
-        )
-
-        max_widths["organism"] = max(max_widths["organism"], len(organism_name))
-        max_widths["common"] = max(max_widths["common"], len(common_name))
-        max_widths["accession"] = max(max_widths["accession"], len(accession))
-
-    # Create a format string based on the calculated max widths
-    fmt_string = (
-        f"{{organism:<{max_widths['organism']}}} | "
-        f"{{common:<{max_widths['common']}}} | "
-        f"{{accession:<{max_widths['accession']}}}"
-    )
-
-    separator = (
-        f"{'-' * max_widths['organism']} | "
-        f"{'-' * max_widths['common']} | "
-        f"{'-' * max_widths['accession']}"
-    )
-
-    print(fmt_string.format(**header))
-    print(separator)
-    for row in data:
-        print(fmt_string.format(**row))
-    print()
-
-
-def _build_session() -> requests.Session:
-    """
-    Return a requests.Session configured with retry logic.
-    Retries restricted to GET
-    Caller responsible for calling session.close()
-    """
-
-    s = requests.Session()
-
-    s.headers.update({"Accept": "application/zip, application/octet-stream, */*"})
-
-    # only retry for GET
-    allowed = frozenset(["GET"])
-    try:
-        retry = Retry(
-            total=RETRIES,
-            backoff_factor=BACKOFF_FACTOR,
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=allowed,
-            raise_on_status=False,
-        )
-    except TypeError:
-        # older urllib3 versions use method_whitelist
-        retry = Retry(
-            total=RETRIES,
-            backoff_factor=BACKOFF_FACTOR,
-            status_forcelist=[429, 500, 502, 503, 504],
-            method_whitelist=allowed,
-            raise_on_status=False,
-        )
-
-    adapter = HTTPAdapter(max_retries=retry)
-    s.mount("https://", adapter)
-    s.mount("http://", adapter)
-
-    return s
-
-
-def _api_request(
-    session: requests.Session, url: str, api_key: str | None = None
-) -> dict:
-    headers = {"Accept": "application/json"}
-    if api_key:
-        headers["api-key"] = api_key
-    try:
-        res = session.get(url, headers=headers, timeout=TIMEOUT_IN_SECONDS)
-        res.raise_for_status()
-        return res.json()
-    except requests.RequestException as e:
-        raise Exception(f"API request failed for URL {url}: {e}")
 
 
 def _download_and_extract(
@@ -392,10 +337,67 @@ def _download_and_extract(
                 pass
 
 
+def _genome_files_exist(dir_path: str, accession: str) -> bool:
+    """Checks if both FASTA and annotation files exist for the given accession."""
+
+    existing_files = os.listdir(dir_path)
+
+    has_fasta = any(
+        f.startswith(accession) and f.endswith(VALID_FASTA_EXTS)
+        for f in existing_files
+    )
+
+    has_annotation = any(
+        f.startswith(accession) and f.endswith(VALID_ANNOTATION_EXTS)
+        for f in existing_files
+    )
+
+    return has_fasta and has_annotation
+
+
+def _print_found_genomes(reports: list) -> None:
+    # Prepare data and find max widths for column alignment
+    header = {
+        "organism": "Organism name",
+        "common": "Common name",
+        "accession": "Accession",
+    }
+    data = []
+    max_widths = {key: len(value) for key, value in header.items()}
+
+    for report in reports:
+        organism_name = report.get("organism", {}).get("organism_name", "N/A")
+        common_name = report.get("organism", {}).get("common_name", "N/A")
+        accession = report.get("accession")
+
+        data.append(
+            {"organism": organism_name, "common": common_name, "accession": accession}
+        )
+
+        max_widths["organism"] = max(max_widths["organism"], len(organism_name))
+        max_widths["common"] = max(max_widths["common"], len(common_name))
+        max_widths["accession"] = max(max_widths["accession"], len(accession))
+
+    # Create a format string based on the calculated max widths
+    fmt_string = (
+        f"{{organism:<{max_widths['organism']}}} | "
+        f"{{common:<{max_widths['common']}}} | "
+        f"{{accession:<{max_widths['accession']}}}"
+    )
+
+    separator = (
+        f"{'-' * max_widths['organism']} | "
+        f"{'-' * max_widths['common']} | "
+        f"{'-' * max_widths['accession']}"
+    )
+
+    print(fmt_string.format(**header))
+    print(separator)
+    for row in data:
+        print(fmt_string.format(**row))
+    print()
+
+
 # --- STANDALONE EXECUTION ---
-def main():
-    return run_get_genomes(_get_args())
-
-
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

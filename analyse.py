@@ -12,7 +12,6 @@ from functools import partial
 import pyfaidx
 
 # Local modules
-from extract import TERMINATOR_FILE_SUFFIX
 from plots import plot_signal_distribution
 
 # Coordinates: -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
@@ -32,23 +31,23 @@ PLOT_CE_X_MAX = 15
 PLOT_FILE_SUFFIX = "_signals_plot.png"
 
 
-def run_analysis(args: argparse.Namespace) -> int:
-    """Runs a full analysis of terminator sequences.
+def main():
+    run_analysis(_get_args())
+
+
+def run_analysis(args: argparse.Namespace) -> None:
+    """Runs an analysis on terminator sequence fasta files.
 
     Args:
         args: Parsed command-line arguments.
-
-    Returns:
-        Exit code (0 for success, 1 for failure).
     """
 
     try:
         # Find all fasta files
         fasta_files = []
         if os.path.isdir(args.input_path):
-            fasta_files = glob.glob(
-                os.path.join(args.input_path, f"*{TERMINATOR_FILE_SUFFIX}")
-            )
+            included_accessions = getattr(args, "included_accessions", None)
+            fasta_files = _get_fasta_files(args.input_path, included_accessions)
             print(f"Found {len(fasta_files)} FASTA files")
         elif os.path.isfile(args.input_path):
             fasta_files = [args.input_path]
@@ -58,7 +57,6 @@ def run_analysis(args: argparse.Namespace) -> int:
                 f"ERROR: No valid FASTA file/s found at path '{args.input_path}'",
                 file=sys.stderr,
             )
-            return 1
 
         # process each file in parallel
         worker = partial(_process_terminator_fasta, args=args)
@@ -79,28 +77,28 @@ def run_analysis(args: argparse.Namespace) -> int:
                 total_skipped += num_skipped
                 total_terminators += num_terminators
 
-        ranked_nue_kmers = _rank_kmers(total_nue_counts, args.top_n)
-        ranked_ce_kmers = _rank_kmers(total_ce_counts, args.top_n)
+        ranked_nue_kmers = _rank_kmers(total_nue_counts, args.num_kmers)
+        ranked_ce_kmers = _rank_kmers(total_ce_counts, args.num_kmers)
 
         print(
             f"\n{total_skipped} of {total_terminators} ({(total_skipped/total_terminators * 100):.2f}%) terminators skipped"
         )
 
-        os.makedirs(args.output_dir, exist_ok=True)
+        os.makedirs(args.results_dir, exist_ok=True)
 
         _save_report(
             "CE",
             ranked_ce_kmers,
-            os.path.join(args.output_dir, "CE_report.txt"),
+            os.path.join(args.results_dir, "CE_report.txt"),
         )
         _save_report(
             "NUE",
             ranked_nue_kmers,
-            os.path.join(args.output_dir, "NUE_report.txt"),
+            os.path.join(args.results_dir, "NUE_report.txt"),
         )
 
-        nue_plot_path = os.path.join(args.output_dir, "NUE" + PLOT_FILE_SUFFIX)
-        ce_plot_path = os.path.join(args.output_dir, "CE" + PLOT_FILE_SUFFIX)
+        nue_plot_path = os.path.join(args.results_dir, "NUE" + PLOT_FILE_SUFFIX)
+        ce_plot_path = os.path.join(args.results_dir, "CE" + PLOT_FILE_SUFFIX)
 
         plot_signal_distribution(
             ranked_nue_kmers,
@@ -120,10 +118,8 @@ def run_analysis(args: argparse.Namespace) -> int:
             ce_plot_path,
         )
 
-        return 0
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
-        return 1
 
 
 def add_analyse_args(
@@ -138,7 +134,7 @@ def add_analyse_args(
 
     parser.add_argument(
         "-n",
-        "--top-n",
+        "--num-kmers",
         type=int,
         default=20,
         help="Number of k-mers to report (default: 20).",
@@ -160,17 +156,16 @@ def add_analyse_args(
         default=1,
         help="Step size for k-mer counting (default: 1).",
     )
+    parser.add_argument(
+        "--results-dir",
+        default=os.path.join("out", "results"),
+        help="Path to the output directory (default: ./out/results).",
+    )
 
     if is_standalone:
         parser.add_argument(
             "input_path",
             help="Path to the terminator sequence FASTA file/s (filepath or directory path).",
-        )
-        parser.add_argument(
-            "-o",
-            "--output-dir",
-            default=os.path.join("out", "analysis"),
-            help="Path to the output directory (default: ./out/analysis).",
         )
         parser.add_argument(
             "-d",
@@ -191,15 +186,20 @@ def _get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Analyses the NUE and CE regions of the given terminator sequences."
     )
+    
     add_analyse_args(parser)
 
     args = parser.parse_args()
+
     if not os.path.exists(args.input_path):
         parser.error(f"'{args.input_path}' does not exist.")
+    
     if not args.min_3utr_length >= abs(NUE_START):
         parser.error(f"Minimum 3'UTR length must be at least {abs(NUE_START)}.")
+    
     if not args.downstream_nts >= CE_END:
         parser.error(f"Downstream nts must be at least {CE_END}.")
+    
     return args
 
 
@@ -397,6 +397,23 @@ def _rank_kmers(kmer_counts: dict, n: int) -> list:
 
 
 # --- HELPER FUNCTIONS ---
+def _get_fasta_files(input_dir: str, included_accessions: set[str] | None) -> list[str]:
+    assert os.path.isdir(input_dir), f"Input path '{input_dir}' is not a directory."
+
+    candidates = glob.glob(os.path.join(input_dir, "*.fa"))
+
+    results = []
+    for fpath in candidates:
+        base = os.path.basename(fpath)
+        accession = os.path.splitext(base)[0]
+        # if filter set provided, include only those accessions
+        if included_accessions and accession not in included_accessions:
+            continue
+        results.append(fpath)
+    
+    return results
+
+
 def _save_report(region_name: str, ranked_kmers: list, out_fpath: str) -> None:
     """Writes a formatted report to a file.
 
@@ -426,9 +443,5 @@ def _save_report(region_name: str, ranked_kmers: list, out_fpath: str) -> None:
 
 
 # --- STANDALONE EXECUTION ---
-def main():
-    return run_analysis(_get_args())
-
-
 if __name__ == "__main__":
     sys.exit(main())
