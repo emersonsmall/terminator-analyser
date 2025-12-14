@@ -497,7 +497,7 @@ def _get_fasta_files(input_dir: str, included_accessions: set[str] | None) -> li
 
 def _save_overall_report(out_fpath: str, metadata: dict) -> None:
     separator_width = 80
-    
+
     lines = []
     lines.append("=" * separator_width + "\n")
     lines.append("Terminator Analysis Overview\n")
