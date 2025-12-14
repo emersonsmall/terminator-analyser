@@ -29,8 +29,6 @@ def plot_signal_distribution(
         out_file: Path to save the output plot image.
     """
 
-    tick_interval = 5
-
     top_kmers = [item["kmer"] for item in ranked_kmers]
 
     # Prepare data for plotting
@@ -59,7 +57,7 @@ def plot_signal_distribution(
     ax.set_xlabel("Position relative to CS", fontsize=12)
     ax.set_ylabel("Count", fontsize=12)
     ax.set_title(
-        f"Distribution of Top {len(ranked_kmers)} Signals in {region}",
+        f"Top {len(ranked_kmers)} Signals in {region}",
         fontsize=14,
         weight="bold",
     )
@@ -97,7 +95,7 @@ def plot_signal_distribution(
         ticks.sort()
         ax.set_xticks(ticks)
     else:
-        ax.set_xticks(range(x_min, x_max + 1, tick_interval))
+        ax.set_xticks(range(x_min, x_max + 1, 5))
 
     plt.tight_layout()
 

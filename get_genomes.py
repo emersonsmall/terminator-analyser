@@ -37,7 +37,7 @@ def run_get_genomes(args: argparse.Namespace) -> set[str] | None:
             args.api_key,
             args.max_genomes,
             args.force,
-            args.exclude_accessions
+            args.exclude_accessions,
         )
 
     except Exception as e:
@@ -60,9 +60,9 @@ def add_get_args(parser: argparse.ArgumentParser, is_standalone: bool = True) ->
     """
 
     parser.add_argument(
-        "taxon", 
+        "taxon",
         type=lambda s: s.lower().strip(),
-        help="Taxon name (e.g., 'Arabidopsis' or 'Arabidopsis thaliana')."
+        help="Taxon name (e.g., 'Arabidopsis' or 'Arabidopsis thaliana').",
     )
     parser.add_argument(
         "--api-key",
@@ -110,7 +110,7 @@ def _get_genomes_by_taxon(
     api_key: str | None,
     max_genomes: int | None,
     force: bool,
-    exclude_accessions: set[str]
+    exclude_accessions: set[str],
 ) -> set[str]:
     """
     Downloads and extracts all reference genomes for the given taxon.
@@ -173,9 +173,7 @@ def _get_genomes_by_taxon(
                 files_to_request.append("GENOME_GTF")
 
             download_url = f"{ACCESSION_BASE_URL}/{quote(accession)}/download?include_annotation_type={','.join(files_to_request)}"
-            _download_and_extract(
-                session, download_url, api_key, output_dir, accession
-            )
+            _download_and_extract(session, download_url, api_key, output_dir, accession)
             num_downloaded += 1
             included_accessions.add(accession)
 
@@ -343,8 +341,7 @@ def _genome_files_exist(dir_path: str, accession: str) -> bool:
     existing_files = os.listdir(dir_path)
 
     has_fasta = any(
-        f.startswith(accession) and f.endswith(VALID_FASTA_EXTS)
-        for f in existing_files
+        f.startswith(accession) and f.endswith(VALID_FASTA_EXTS) for f in existing_files
     )
 
     has_annotation = any(
