@@ -70,15 +70,18 @@ def run_analysis(args: argparse.Namespace) -> None:
         accession_stats = {}
 
         with Pool() as pool:
-            for (
-                nue_counts,
-                ce_counts,
-                nue_presence,
-                ce_presence,
-                num_skipped,
-                num_terminators,
-                accession,
-            ) in pool.imap_unordered(worker, fasta_files):
+            for result in pool.imap_unordered(worker, fasta_files):
+                (
+                    nue_counts,
+                    ce_counts,
+                    nue_presence,
+                    ce_presence,
+                    num_skipped,
+                    num_terminators,
+                    accession,
+                ) = result
+
+                # merge positional counts
                 _merge_counts(total_nue_counts, nue_counts)
                 _merge_counts(total_ce_counts, ce_counts)
 
@@ -120,6 +123,8 @@ def run_analysis(args: argparse.Namespace) -> None:
         os.makedirs(args.results_dir, exist_ok=True)
 
         taxon = getattr(args, "taxon", None)
+        extraction_stats = getattr(args, "extraction_stats", None)
+
         report_metadata = {
             "taxon": taxon,
             "generated_at": datetime.datetime.now(),
@@ -132,6 +137,7 @@ def run_analysis(args: argparse.Namespace) -> None:
             "included_terminators": total_terminators - total_skipped,
             "num_accessions": len(accession_stats),
             "accession_stats": accession_stats,
+            "extraction_stats": extraction_stats,
         }
 
         _save_overall_report(
@@ -496,7 +502,7 @@ def _get_fasta_files(input_dir: str, included_accessions: set[str] | None) -> li
 
 
 def _save_overall_report(out_fpath: str, metadata: dict) -> None:
-    separator_width = 80
+    separator_width = 100
 
     lines = []
     lines.append("=" * separator_width + "\n")
@@ -527,8 +533,10 @@ def _save_overall_report(out_fpath: str, metadata: dict) -> None:
     lines.append("\n")
 
     accession_stats = metadata.get("accession_stats") or {}
+    extraction_stats = metadata.get("extraction_stats") or {}
+
     if accession_stats:
-        lines.append("PER-ACCESSION BREAKDOWN\n")
+        lines.append("TERMINATOR COUNTS BY ACCESSION\n")
         lines.append("-" * separator_width + "\n")
 
         header = {
@@ -614,6 +622,124 @@ def _save_overall_report(out_fpath: str, metadata: dict) -> None:
         )
         lines.append("\n")
 
+    # Extraction skip reasons per accession (if available)
+    if extraction_stats:
+        lines.append("TRANSCRIPT COUNTS BY ACCESSION\n")
+        lines.append("-" * separator_width + "\n")
+
+        # Collect all reason keys across accessions to build columns
+        all_reasons = set()
+        for stats in extraction_stats.values():
+            all_reasons.update(stats.get("skip_reasons", {}).keys())
+        all_reasons = sorted(all_reasons)
+
+        if not all_reasons:
+            lines.append("No transcripts skipped during extraction.\n\n")
+        else:
+            header = {
+                "accession": "Accession",
+                "total": "Total",
+                "extracted": "Extracted",
+                "skipped": "Skipped",
+                **{r: r for r in all_reasons},
+            }
+
+            # Compute column widths
+            maxw = {
+                "accession": len(header["accession"]),
+                "total": len(header["total"]),
+                "extracted": len(header["extracted"]),
+                "skipped": len(header["skipped"]),
+            }
+            for r in all_reasons:
+                maxw[r] = len(r)
+
+            # Accumulate totals
+            total_extracted = 0
+            total_skipped = 0
+            total_transcripts = 0
+            total_reasons = {r: 0 for r in all_reasons}
+
+            for accession, stats in extraction_stats.items():
+                num_extracted = stats.get("num_extracted", 0)
+                skip_reasons = stats.get("skip_reasons", {})
+                acc_skipped = sum(skip_reasons.values())
+                acc_transcripts = num_extracted + acc_skipped
+
+                total_extracted += num_extracted
+                total_skipped += acc_skipped
+                total_transcripts += acc_transcripts
+                for r in all_reasons:
+                    total_reasons[r] += skip_reasons.get(r, 0)
+
+                maxw["accession"] = max(maxw["accession"], len(accession))
+                maxw["total"] = max(maxw["total"], len(f"{acc_transcripts:,}"))
+                maxw["extracted"] = max(maxw["extracted"], len(f"{num_extracted:,}"))
+                maxw["skipped"] = max(maxw["skipped"], len(f"{acc_skipped:,}"))
+                for r in all_reasons:
+                    maxw[r] = max(maxw[r], len(f"{skip_reasons.get(r,0):,}"))
+
+            # Also consider TOTAL row widths
+            maxw["accession"] = max(maxw["accession"], len("TOTAL"))
+            maxw["total"] = max(maxw["total"], len(f"{total_transcripts:,}"))
+            maxw["extracted"] = max(maxw["extracted"], len(f"{total_extracted:,}"))
+            maxw["skipped"] = max(maxw["skipped"], len(f"{total_skipped:,}"))
+            for r in all_reasons:
+                maxw[r] = max(maxw[r], len(f"{total_reasons[r]:,}"))
+
+            # Build format strings
+            fmt_parts = [
+                f"{{accession:<{maxw['accession']}}}",
+                f"{{total:>{maxw['total']}}}",
+                f"{{extracted:>{maxw['extracted']}}}",
+                f"{{skipped:>{maxw['skipped']}}}",
+            ]
+            sep_parts = [
+                "-" * maxw["accession"],
+                "-" * maxw["total"],
+                "-" * maxw["extracted"],
+                "-" * maxw["skipped"],
+            ]
+            for r in all_reasons:
+                fmt_parts.append(f"{{{r}:>{maxw[r]}}}")
+                sep_parts.append("-" * maxw[r])
+
+            fmt = " | ".join(fmt_parts)
+            sep = " | ".join(sep_parts)
+
+            # Write header
+            lines.append(fmt.format(**header) + "\n")
+            lines.append(sep + "\n")
+
+            # Rows per accession (sorted by accession)
+            for accession, stats in sorted(
+                extraction_stats.items(), key=lambda x: x[0]
+            ):
+                num_extracted = stats.get("num_extracted", 0)
+                skip_reasons = stats.get("skip_reasons", {})
+                acc_skipped = sum(skip_reasons.values())
+                row = {
+                    "accession": accession,
+                    "total": f"{num_extracted + acc_skipped:,}",
+                    "extracted": f"{num_extracted:,}",
+                    "skipped": f"{acc_skipped:,}",
+                }
+                for r in all_reasons:
+                    row[r] = f"{skip_reasons.get(r, 0):,}"
+                lines.append(fmt.format(**row) + "\n")
+
+            # Separator and TOTAL row
+            lines.append(sep + "\n")
+            total_row = {
+                "accession": "TOTAL",
+                "total": f"{total_transcripts:,}",
+                "extracted": f"{total_extracted:,}",
+                "skipped": f"{total_skipped:,}",
+            }
+            for r in all_reasons:
+                total_row[r] = f"{total_reasons[r]:,}"
+            lines.append(fmt.format(**total_row) + "\n\n")
+
     lines.append("SUGGESTED ADDITIONAL METRICS\n")
     lines.append("-" * separator_width + "\n")
     lines.append("* Median/mean 3'UTR length across included terminators\n")
@@ -623,6 +749,7 @@ def _save_overall_report(out_fpath: str, metadata: dict) -> None:
 
     with open(out_fpath, "w") as f:
         f.writelines(lines)
+
     print(f"Overview report saved to '{out_fpath}'")
 
 

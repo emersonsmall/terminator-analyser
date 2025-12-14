@@ -14,7 +14,37 @@ import gffutils  # https://anaconda.org/bioconda/gffutils
 # Internal modules
 from get_genomes import VALID_FASTA_EXTS, VALID_ANNOTATION_EXTS
 
-# UTR refers to 3'UTR unless otherwise specified
+# utr refers to 3'UTR unless otherwise specified
+
+
+class NoUTRException(Exception):
+    """Raised when a transcript has no implied 3' UTR based on CDS and exon coordinates."""
+
+    pass
+
+
+class InvalidStrandException(Exception):
+    """Raised when a transcript has an invalid or unknown strand."""
+
+    pass
+
+
+class NoCDSException(Exception):
+    """Raised when a transcript has no CDS features."""
+
+    pass
+
+
+class NoExonException(Exception):
+    """Raised when a transcript has no exon features."""
+
+    pass
+
+
+class FailedFilterException(Exception):
+    """Raised when a terminator sequence fails filtering criteria."""
+
+    pass
 
 
 def main() -> None:
@@ -28,8 +58,19 @@ def run_extraction(args: argparse.Namespace) -> None:
 
         # process each genome in parallel
         worker = partial(_extract_all_terminators, args=args)
+
+        extraction_stats = {}
         with Pool() as pool:
-            pool.map(worker, file_pairs)
+            for result in pool.imap_unordered(worker, file_pairs):
+                if result:
+                    extraction_stats[result["accession"]] = {
+                        "num_extracted": result["num_extracted"],
+                        "skip_reasons": result["skip_reasons"],
+                    }
+
+        args.extraction_stats = (
+            extraction_stats  # store stats in args for downstream use
+        )
 
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -105,51 +146,13 @@ def _get_args() -> argparse.Namespace:
     return args
 
 
-def _is_internal_priming_artifact(
-    downstream_sequence: str, consecutive_a: int, total_a: int, window_size: int
-) -> bool:
-    """
-    Checks if the given downstream sequence indicates an internal priming artifact.
-    Methodology based on Beaudong et al. DOI: 10.1101/gr.10.7.1001
-
-    Args:
-        downstream_sequence: The downstream sequence to check.
-        consecutive_a: The number of consecutive 'A's to classify sequence as an artifact.
-        total_a: The total number of 'A's in the window to classify sequence as an artifact.
-        window_size: The number of nucleotides to check from the start of the sequence.
-
-    Returns:
-        bool: True if the sequence is an internal priming artifact, False otherwise.
-    """
-
-    assert (
-        len(downstream_sequence) >= window_size
-    ), "Downstream sequence length must be greater than or equal to window size."
-    assert consecutive_a >= 0, "Filter for consecutive A's must be non-negative."
-    assert total_a >= 0, "Filter for total A's in window must be non-negative."
-    assert window_size > 0, "Window size must be greater than 0."
-
-    if consecutive_a == 0 and total_a == 0:
-        return False
-
-    region_to_check = downstream_sequence[:window_size]
-
-    if consecutive_a > 0 and "A" * consecutive_a in region_to_check:
-        return True
-
-    if total_a > 0 and region_to_check.count("A") >= total_a:
-        return True
-
-    return False
-
-
 def _extract_terminator(
     tscript: gffutils.Feature,
     fasta: pyfaidx.Fasta,
     cds_features: list,
     exon_features: list,
     num_downstream_nts: int,
-) -> str | None:
+) -> str:
     """
     Extracts the terminator sequence for a given transcript feature.
     Handles strand sense and reverse complementing.
@@ -188,14 +191,12 @@ def _extract_terminator(
         downstream_end = tscript.start - 1
 
     else:
-        print(
-            f"WARNING: unknown strand '{tscript.strand}' for feature '{tscript.id}', skipping",
-            file=sys.stderr,
+        raise InvalidStrandException(
+            f"Transcript '{tscript.id}' has invalid strand '{tscript.strand}'."
         )
-        return None
 
     if not utr_parts:
-        return None
+        raise NoUTRException(f"Transcript '{tscript.id}' has no implied 3' UTR.")
 
     full_utr = "".join(utr_parts)
     downstream_seq = ""
@@ -217,7 +218,7 @@ def _passes_filter(term_seq: str, args: argparse.Namespace) -> bool:
     Applies filters to the terminator sequence.
 
     Returns:
-        bool: True if the sequence passes the filters, False otherwise.
+        True if the sequence passes the filters, False otherwise.
     """
 
     if args.raw_dna:
@@ -246,45 +247,42 @@ def _process_transcript(
 ) -> str | None:
     """Processes a single transcript feature to extract and format its terminator sequence."""
 
-    try:
-        cds_features = list(db.children(tscript, featuretype="CDS", order_by="start"))
-        exon_features = list(db.children(tscript, featuretype="exon", order_by="start"))
+    cds_features = list(db.children(tscript, featuretype="CDS", order_by="start"))
+    exon_features = list(db.children(tscript, featuretype="exon", order_by="start"))
 
-        # some GFF formats have CDS and exon features as children of gene, not transcript
-        if not cds_features or not exon_features:
-            try:
-                parent_gene = list(db.parents(tscript))[0]
-                if not cds_features:
-                    cds_features = list(
-                        db.children(parent_gene, featuretype="CDS", order_by="start")
-                    )
-                if not exon_features:
-                    exon_features = list(
-                        db.children(parent_gene, featuretype="exon", order_by="start")
-                    )
-            except (IndexError, StopIteration):
-                pass
+    # some GFF formats have CDS and exon features as children of gene, not transcript
+    if not cds_features or not exon_features:
+        try:
+            parent_gene = list(db.parents(tscript))[0]
+            if not cds_features:
+                cds_features = list(
+                    db.children(parent_gene, featuretype="CDS", order_by="start")
+                )
+            if not exon_features:
+                exon_features = list(
+                    db.children(parent_gene, featuretype="exon", order_by="start")
+                )
+        except (IndexError, StopIteration):
+            pass
 
-        if not cds_features or not exon_features:
-            return None
+    if not exon_features:
+        raise NoExonException(f"Transcript '{tscript.id}' has no exon features.")
+    if not cds_features:
+        raise NoCDSException(f"Transcript '{tscript.id}' has no CDS features.")
 
-        term_seq = _extract_terminator(
-            tscript, fasta, cds_features, exon_features, args.num_downstream_nts
+    term_seq = _extract_terminator(
+        tscript, fasta, cds_features, exon_features, args.num_downstream_nts
+    )
+
+    if not _passes_filter(term_seq, args):
+        raise FailedFilterException(
+            f"Transcript '{tscript.id}' terminator sequence failed filtering."
         )
 
-        if not term_seq or not _passes_filter(term_seq, args):
-            return None
-
-        return _format_fasta_record(tscript, term_seq, args.raw_dna)
-
-    except Exception as e:
-        print(
-            f"WARNING: could not process feature '{tscript.id}': {e}", file=sys.stderr
-        )
-        return None
+    return _format_fasta_record(tscript, term_seq, args.raw_dna)
 
 
-def _extract_all_terminators(file_pair: tuple, args: argparse.Namespace) -> None:
+def _extract_all_terminators(file_pair: tuple, args: argparse.Namespace) -> dict | None:
     """
     Extracts terminator sequences from the given fasta and gff files.
 
@@ -312,7 +310,7 @@ def _extract_all_terminators(file_pair: tuple, args: argparse.Namespace) -> None
         print(
             f"{accession} terminators already exist at '{terminators_fpath}', skipping"
         )
-        return
+        return None
 
     print(f"Processing genome {accession}")
 
@@ -341,22 +339,82 @@ def _extract_all_terminators(file_pair: tuple, args: argparse.Namespace) -> None
             f"WARNING: No transcripts found with labels {transcript_labels} in '{annotation_fpath}', skipping",
             file=sys.stderr,
         )
-        return
+        return None
 
     out_records = []
-    num_skipped = 0
+    skip_reasons = {}
+
     for tscript in transcripts:
-        record = _process_transcript(tscript, db, fasta, args)
-        if record:
+        try:
+            record = _process_transcript(tscript, db, fasta, args)
             out_records.append(record)
-        else:
-            num_skipped += 1
+        except NoUTRException:
+            skip_reasons["no_utr"] = skip_reasons.get("no_utr", 0) + 1
+        except InvalidStrandException:
+            skip_reasons["invalid_strand"] = skip_reasons.get("invalid_strand", 0) + 1
+        except NoCDSException:
+            skip_reasons["no_cds"] = skip_reasons.get("no_cds", 0) + 1
+        except NoExonException:
+            skip_reasons["no_exon"] = skip_reasons.get("no_exon", 0) + 1
+        except FailedFilterException:
+            skip_reasons["filter_failed"] = skip_reasons.get("filter_failed", 0) + 1
+        except Exception as e:
+            print(
+                f"WARNING: Unexpected error processing '{tscript.id}': {e}",
+                file=sys.stderr,
+            )
+            skip_reasons["unexpected_error"] = (
+                skip_reasons.get("unexpected_error", 0) + 1
+            )
 
     with open(terminators_fpath, "w") as out_f:
         out_f.writelines(out_records)
 
     print(f"Extracted {len(out_records)} terminator sequences to '{terminators_fpath}'")
-    print(f"skipped {num_skipped} transcripts")
+
+    return {
+        "accession": accession,
+        "num_extracted": len(out_records),
+        "skip_reasons": skip_reasons,
+    }
+
+
+def _is_internal_priming_artifact(
+    downstream_sequence: str, consecutive_a: int, total_a: int, window_size: int
+) -> bool:
+    """
+    Checks if the given downstream sequence indicates an internal priming artifact.
+    Methodology based on Beaudong et al. DOI: 10.1101/gr.10.7.1001
+
+    Args:
+        downstream_sequence: The downstream sequence to check.
+        consecutive_a: The number of consecutive 'A's to classify sequence as an artifact.
+        total_a: The total number of 'A's in the window to classify sequence as an artifact.
+        window_size: The number of nucleotides to check from the start of the sequence.
+
+    Returns:
+        bool: True if the sequence is an internal priming artifact, False otherwise.
+    """
+
+    assert (
+        len(downstream_sequence) >= window_size
+    ), "Downstream sequence length must be greater than or equal to window size."
+    assert consecutive_a >= 0, "Filter for consecutive A's must be non-negative."
+    assert total_a >= 0, "Filter for total A's in window must be non-negative."
+    assert window_size > 0, "Window size must be greater than 0."
+
+    if consecutive_a == 0 and total_a == 0:
+        return False
+
+    region_to_check = downstream_sequence[:window_size]
+
+    if consecutive_a > 0 and "A" * consecutive_a in region_to_check:
+        return True
+
+    if total_a > 0 and region_to_check.count("A") >= total_a:
+        return True
+
+    return False
 
 
 # --- HELPER FUNCTIONS ---
