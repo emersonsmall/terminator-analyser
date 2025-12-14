@@ -17,13 +17,19 @@ from plots import plot_signal_distribution
 
 # Coordinates: -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 
-# Analysis window coordinates
-NUE_START = -50
-NUE_END = -1
-CE_START = (
+# Analysis window coordinates - used for counting kmers
+NUE_ANALYSIS_WINDOW_START = -50
+NUE_ANALYSIS_WINDOW_END = -1
+CE_ANALYSIS_WINDOW_START = (
     -10
-)  # Loke et al. uses -15, but -10 gives better results. NUE signals dominate if using -15
-CE_END = 20
+)  # Loke et al. uses -15, but NUE signals dominate if using -15
+CE_ANALYSIS_WINDOW_END = 20
+
+# Expected region coordinates - used for % occurrence of signals
+NUE_EXPECTED_START = -30
+NUE_EXPECTED_END = -13
+CE_EXPECTED_START = -10
+CE_EXPECTED_END = 10
 
 PLOT_NUE_X_MIN = -35
 PLOT_NUE_X_MAX = -5
@@ -37,12 +43,6 @@ def main():
 
 
 def run_analysis(args: argparse.Namespace) -> None:
-    """Runs an analysis on terminator sequence fasta files.
-
-    Args:
-        args: Parsed command-line arguments.
-    """
-
     try:
         # Find all fasta files
         fasta_files = []
@@ -63,6 +63,8 @@ def run_analysis(args: argparse.Namespace) -> None:
         worker = partial(_process_terminator_fasta, args=args)
         total_nue_counts = {}
         total_ce_counts = {}
+        total_nue_presence = {}
+        total_ce_presence = {}
         total_skipped = 0
         total_terminators = 0
         accession_stats = {}
@@ -71,12 +73,21 @@ def run_analysis(args: argparse.Namespace) -> None:
             for (
                 nue_counts,
                 ce_counts,
+                nue_presence,
+                ce_presence,
                 num_skipped,
                 num_terminators,
-                accession
+                accession,
             ) in pool.imap_unordered(worker, fasta_files):
                 _merge_counts(total_nue_counts, nue_counts)
                 _merge_counts(total_ce_counts, ce_counts)
+
+                # merge presence counts
+                for kmer, count in nue_presence.items():
+                    total_nue_presence[kmer] = total_nue_presence.get(kmer, 0) + count
+                for kmer, count in ce_presence.items():
+                    total_ce_presence[kmer] = total_ce_presence.get(kmer, 0) + count
+
                 total_skipped += num_skipped
                 total_terminators += num_terminators
                 accession_stats[accession] = {
@@ -85,16 +96,29 @@ def run_analysis(args: argparse.Namespace) -> None:
                     "skipped": num_skipped,
                 }
 
-        ranked_nue_kmers = _rank_kmers(total_nue_counts, args.num_kmers)
-        ranked_ce_kmers = _rank_kmers(total_ce_counts, args.num_kmers)
+        top_nue_kmers = _rank_kmers(total_nue_counts, args.num_kmers)
+        top_ce_kmers = _rank_kmers(total_ce_counts, args.num_kmers)
 
-        print(
-            f"\n{total_skipped} of {total_terminators} ({(total_skipped/total_terminators * 100):.2f}%) terminators skipped"
-        )
+        # calculate % occurrence for top kmers
+        total_included = total_terminators - total_skipped
+        for kmer_info in top_nue_kmers:
+            kmer = kmer_info["kmer"]
+            presence_count = total_nue_presence.get(kmer, 0)
+            kmer_info["presence_count"] = presence_count
+            kmer_info["pct_occurrence"] = (
+                (presence_count / total_included * 100) if total_included > 0 else 0
+            )
+
+        for kmer_info in top_ce_kmers:
+            kmer = kmer_info["kmer"]
+            presence_count = total_ce_presence.get(kmer, 0)
+            kmer_info["presence_count"] = presence_count
+            kmer_info["pct_occurrence"] = (
+                (presence_count / total_included * 100) if total_included > 0 else 0
+            )
 
         os.makedirs(args.results_dir, exist_ok=True)
 
-        # Prepare metadata for reports
         taxon = getattr(args, "taxon", None)
         report_metadata = {
             "taxon": taxon,
@@ -110,28 +134,30 @@ def run_analysis(args: argparse.Namespace) -> None:
             "accession_stats": accession_stats,
         }
 
-        _save_report(
-            "CE",
-            ranked_ce_kmers,
-            os.path.join(args.results_dir, "CE_report.txt"),
+        _save_overall_report(
+            os.path.join(args.results_dir, "analysis_overview.txt"),
             report_metadata,
-            CE_START,
-            CE_END,
         )
-        _save_report(
-            "NUE",
-            ranked_nue_kmers,
+        _save_region_report(
+            os.path.join(args.results_dir, "CE_report.txt"),
+            "CE",
+            top_ce_kmers,
+            (CE_ANALYSIS_WINDOW_START, CE_ANALYSIS_WINDOW_END),
+            args.kmer_size,
+        )
+        _save_region_report(
             os.path.join(args.results_dir, "NUE_report.txt"),
-            report_metadata,
-            NUE_START,
-            NUE_END,
+            "NUE",
+            top_nue_kmers,
+            (NUE_ANALYSIS_WINDOW_START, NUE_ANALYSIS_WINDOW_END),
+            args.kmer_size,
         )
 
         nue_plot_path = os.path.join(args.results_dir, "NUE" + PLOT_FILE_SUFFIX)
         ce_plot_path = os.path.join(args.results_dir, "CE" + PLOT_FILE_SUFFIX)
 
         plot_signal_distribution(
-            ranked_nue_kmers,
+            top_nue_kmers,
             total_nue_counts,
             "NUE",
             PLOT_NUE_X_MIN,
@@ -139,7 +165,7 @@ def run_analysis(args: argparse.Namespace) -> None:
             nue_plot_path,
         )
         plot_signal_distribution(
-            ranked_ce_kmers,
+            top_ce_kmers,
             total_ce_counts,
             "CE",
             PLOT_CE_X_MIN,
@@ -215,34 +241,37 @@ def _get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Analyses the NUE and CE regions of the given terminator sequences."
     )
-    
+
     add_analyse_args(parser)
 
     args = parser.parse_args()
 
     if not os.path.exists(args.input_path):
         parser.error(f"'{args.input_path}' does not exist.")
-    
-    if not args.min_3utr_length >= abs(NUE_START):
-        parser.error(f"Minimum 3'UTR length must be at least {abs(NUE_START)}.")
-    
-    if not args.num_downstream_nts >= CE_END:
-        parser.error(f"Downstream nts must be at least {CE_END}.")
-    
+
+    if not args.min_3utr_length >= abs(NUE_ANALYSIS_WINDOW_START):
+        parser.error(
+            f"Minimum 3'UTR length must be at least {abs(NUE_ANALYSIS_WINDOW_START)}."
+        )
+
+    if not args.num_downstream_nts >= CE_ANALYSIS_WINDOW_END:
+        parser.error(f"Downstream nts must be at least {CE_ANALYSIS_WINDOW_END}.")
+
     return args
 
 
 def _count_kmers(
     sequences: list[str],
-    region_start: int,
-    region_end: int,
+    analysis_window: tuple[int, int],
     kmer_size: int,
     num_downstream_nts: int,
     step_size: int,
-) -> dict:
+    expected_region: tuple[int, int],
+) -> tuple[dict, dict]:
     """
     Counts k-mers at each position within the specified region across all sequences.
     If region_start and region_end are 0, counts k-mers across the whole sequence.
+    Also counts binary presence (max 1 per sequence per kmer) of k-mers within the expected window.
 
     Args:
         sequences: List of sequences to analyse.
@@ -252,17 +281,22 @@ def _count_kmers(
         step_size: Step size for k-mer counting.
 
     Returns:
-        Dictionary of k-mer counts by position { kmer: { pos1: count, pos2: count } }.
+        Tuple of (positional_counts, presence_counts):
+            - positional_counts: Dictionary of k-mer counts by position { kmer: { pos1: count, pos2: count } }.
+            - presence_counts: Dictionary of k-mer presence counts { kmer: count }
     """
+
+    window_start, window_end = analysis_window
+    region_start, region_end = expected_region
 
     assert isinstance(sequences, list) and all(
         isinstance(s, str) for s in sequences
     ), "Sequences must be a list of strings."
-    assert isinstance(region_start, int) and isinstance(
-        region_end, int
+    assert isinstance(window_start, int) and isinstance(
+        window_end, int
     ), "Region start and end must be integers."
     assert (
-        region_start <= region_end
+        window_start <= window_end
     ), "Region start must be less than or equal to region end."
     assert (
         isinstance(kmer_size, int) and kmer_size > 0
@@ -272,27 +306,38 @@ def _count_kmers(
     ), "Step size must be a positive integer."
 
     positional_counts = {}
-
-    is_global = region_start == 0 and region_end == 0
+    presence_counts = {}
+    is_global = window_start == 0 and window_end == 0
 
     for seq in sequences:
         seq_len = len(seq)
         utr_len = seq_len - num_downstream_nts
+        seen_in_seq = set()
 
         for i in range(0, seq_len - kmer_size + 1, step_size):
             pos = (i + kmer_size - 1) - utr_len  # anchored to rightmost nt of kmer
             if pos >= 0:
                 pos += 1  # +1 is the first nt of downstream region
 
-            if is_global or (region_start <= pos <= region_end):
+            if is_global or (window_start <= pos <= window_end):
                 kmer = seq[i : i + kmer_size]
+
+                # positional counts (analysis window)
                 if kmer not in positional_counts:
                     positional_counts[kmer] = {}
                 if pos not in positional_counts[kmer]:
                     positional_counts[kmer][pos] = 0
                 positional_counts[kmer][pos] += 1
 
-    return positional_counts
+                # presence counts (expected region)
+                if region_start <= pos <= region_end:
+                    if kmer not in seen_in_seq:
+                        seen_in_seq.add(kmer)
+                        if kmer not in presence_counts:
+                            presence_counts[kmer] = 0
+                        presence_counts[kmer] += 1
+
+    return positional_counts, presence_counts
 
 
 def _process_terminator_fasta(fasta_fpath: str, args: argparse.Namespace) -> tuple:
@@ -318,7 +363,7 @@ def _process_terminator_fasta(fasta_fpath: str, args: argparse.Namespace) -> tup
     for record in fa_records:
         num_terminators += 1
 
-        seq = str(record).upper()
+        seq = str(record)
         total_len = len(seq)
         utr_len = total_len - args.num_downstream_nts
 
@@ -328,33 +373,37 @@ def _process_terminator_fasta(fasta_fpath: str, args: argparse.Namespace) -> tup
 
         terminators.append(seq)
 
-    nue_counts = _count_kmers(
+    nue_counts, nue_presence = _count_kmers(
         terminators,
-        NUE_START,
-        NUE_END,
+        (NUE_ANALYSIS_WINDOW_START, NUE_ANALYSIS_WINDOW_END),
         args.kmer_size,
         args.num_downstream_nts,
         args.step_size,
+        (NUE_EXPECTED_START, NUE_EXPECTED_END),
     )
-    ce_counts = _count_kmers(
+    ce_counts, ce_presence = _count_kmers(
         terminators,
-        CE_START,
-        CE_END,
+        (CE_ANALYSIS_WINDOW_START, CE_ANALYSIS_WINDOW_END),
         args.kmer_size,
         args.num_downstream_nts,
         args.step_size,
+        (CE_EXPECTED_START, CE_EXPECTED_END),
     )
 
-    return nue_counts, ce_counts, num_skipped, num_terminators, accession
+    return (
+        nue_counts,
+        ce_counts,
+        nue_presence,
+        ce_presence,
+        num_skipped,
+        num_terminators,
+        accession,
+    )
 
 
 def _merge_counts(target: dict, src: dict) -> None:
     """
-    Merges k-mer counts from source into target.
-
-    Args:
-        target: Target dictionary to merge into.
-        src: Source dictionary to merge from.
+    Merges k-mer counts from src into target.
     """
 
     for kmer, pos_map in src.items():
@@ -442,49 +491,32 @@ def _get_fasta_files(input_dir: str, included_accessions: set[str] | None) -> li
         if included_accessions and accession not in included_accessions:
             continue
         results.append(fpath)
-    
+
     return results
 
 
-def _save_report(
-    region_name: str,
-    ranked_kmers: list,
-    out_fpath: str,
-    metadata: dict,
-    region_start: int,
-    region_end: int,
-) -> None:
-    """Writes a formatted analysis report to a file.
-
-    Args:
-        region_name: Name of the region (e.g., "NUE" or "CE").
-        ranked_kmers: List of top N k-mers with their statistics.
-        out_fpath: Path to the output file.
-        metadata: Dictionary containing analysis metadata.
-        region_start: Start position of the analysis region.
-        region_end: End position of the analysis region.
-    """
-
+def _save_overall_report(out_fpath: str, metadata: dict) -> None:
+    separator_width = 80
+    
     lines = []
+    lines.append("=" * separator_width + "\n")
+    lines.append("Terminator Analysis Overview\n")
+    lines.append("=" * separator_width + "\n\n")
 
-    # Header
-    lines.append("=" * 80 + "\n")
-    lines.append(f"Terminator Analysis Report - {region_name} Region\n")
-    lines.append("=" * 80 + "\n\n")
-
-    # Metadata section
     lines.append("ANALYSIS METADATA\n")
-    lines.append("-" * 80 + "\n")
+    lines.append("-" * separator_width + "\n")
     if metadata.get("taxon"):
         lines.append(f"Taxon:                  {metadata['taxon']}\n")
     lines.append(
         f"Generated:              {metadata['generated_at'].strftime('%Y-%m-%d %H:%M:%S')}\n"
     )
-    lines.append(f"Analysis Window:        {region_start} to {region_end}\n")
     lines.append(f"K-mer Size:             {metadata['kmer_size']}\n")
     lines.append(f"Step Size:              {metadata['step_size']}\n")
     lines.append(f"Min 3'UTR Length:       {metadata['min_3utr_length']} nt\n")
     lines.append(f"Num Downstream nt:      {metadata['num_downstream_nts']} nt\n")
+    lines.append(f"Total Terminators:      {metadata['total_terminators']:,}\n")
+    lines.append(f"Included Terminators:   {metadata['included_terminators']:,}\n")
+    lines.append(f"Skipped Terminators:    {metadata['skipped_terminators']:,}\n")
     skip_pct = (
         (metadata["skipped_terminators"] / metadata["total_terminators"] * 100)
         if metadata["total_terminators"] > 0
@@ -494,17 +526,10 @@ def _save_report(
     lines.append(f"Number of Accessions:   {metadata['num_accessions']}\n")
     lines.append("\n")
 
-    # Per-accession breakdown table
-    if metadata["accession_stats"]:
+    accession_stats = metadata.get("accession_stats") or {}
+    if accession_stats:
         lines.append("PER-ACCESSION BREAKDOWN\n")
-        lines.append("-" * 80 + "\n")
-
-        accession_stats = metadata["accession_stats"]
-        
-        # Totals for TOTAL row
-        total_all = metadata["total_terminators"]
-        total_included = metadata["included_terminators"]
-        total_skipped = metadata["skipped_terminators"]
+        lines.append("-" * separator_width + "\n")
 
         header = {
             "accession": "Accession",
@@ -513,8 +538,10 @@ def _save_report(
             "skipped": "Skipped",
             "pct": "% of Included",
         }
+        total_all = metadata["total_terminators"]
+        total_included = metadata["included_terminators"]
+        total_skipped = metadata["skipped_terminators"]
 
-        # Calculate column widths including header, data rows, AND TOTAL row
         max_widths = {
             "accession": len(header["accession"]),
             "total": len(header["total"]),
@@ -523,7 +550,6 @@ def _save_report(
             "pct": len(header["pct"]),
         }
 
-        # Include accession data rows
         for accession, stats in accession_stats.items():
             max_widths["accession"] = max(max_widths["accession"], len(accession))
             max_widths["total"] = max(max_widths["total"], len(f"{stats['total']:,}"))
@@ -534,22 +560,19 @@ def _save_report(
                 max_widths["skipped"], len(f"{stats['skipped']:,}")
             )
 
-        # Include TOTAL row in width calculations
         max_widths["accession"] = max(max_widths["accession"], len("TOTAL"))
         max_widths["total"] = max(max_widths["total"], len(f"{total_all:,}"))
         max_widths["included"] = max(max_widths["included"], len(f"{total_included:,}"))
         max_widths["skipped"] = max(max_widths["skipped"], len(f"{total_skipped:,}"))
 
-        # Now build format string with final widths
-        fmt_string = (
+        fmt = (
             f"{{accession:<{max_widths['accession']}}} | "
             f"{{total:>{max_widths['total']}}} | "
             f"{{included:>{max_widths['included']}}} | "
             f"{{skipped:>{max_widths['skipped']}}} | "
             f"{{pct:>{max_widths['pct']}}}"
         )
-
-        separator = (
+        sep = (
             f"{'-' * max_widths['accession']} | "
             f"{'-' * max_widths['total']} | "
             f"{'-' * max_widths['included']} | "
@@ -557,22 +580,18 @@ def _save_report(
             f"{'-' * max_widths['pct']}"
         )
 
-        # Print header
-        lines.append(fmt_string.format(**header) + "\n")
-        lines.append(separator + "\n")
+        lines.append(fmt.format(**header) + "\n")
+        lines.append(sep + "\n")
 
-        # Print data rows sorted by total count descending
         sorted_accessions = sorted(
             accession_stats.items(), key=lambda x: x[1]["total"], reverse=True
         )
         for accession, stats in sorted_accessions:
             pct = (
-                (stats["included"] / metadata["included_terminators"] * 100)
-                if metadata["included_terminators"] > 0
-                else 0
+                (stats["included"] / total_included * 100) if total_included > 0 else 0
             )
             lines.append(
-                fmt_string.format(
+                fmt.format(
                     accession=accession,
                     total=f"{stats['total']:,}",
                     included=f"{stats['included']:,}",
@@ -582,10 +601,9 @@ def _save_report(
                 + "\n"
             )
 
-        # Bottom-line totals
-        lines.append(separator + "\n")
+        lines.append(sep + "\n")
         lines.append(
-            fmt_string.format(
+            fmt.format(
                 accession="TOTAL",
                 total=f"{total_all:,}",
                 included=f"{total_included:,}",
@@ -596,84 +614,122 @@ def _save_report(
         )
         lines.append("\n")
 
-    # Top K-mers section
+    lines.append("SUGGESTED ADDITIONAL METRICS\n")
+    lines.append("-" * separator_width + "\n")
+    lines.append("* Median/mean 3'UTR length across included terminators\n")
+    lines.append("* Entropy/information content per position (for logos)\n")
+    lines.append("\n")
+    lines.append("=" * separator_width + "\n")
+
+    with open(out_fpath, "w") as f:
+        f.writelines(lines)
+    print(f"Overview report saved to '{out_fpath}'")
+
+
+def _save_region_report(
+    out_fpath: str,
+    region_name: str,
+    ranked_kmers: list,
+    region_window: tuple[int, int],
+    kmer_size: int,
+) -> None:
+
+    separator_width = 100
+
+    lines = []
+    lines.append("=" * separator_width + "\n")
+    lines.append(f"{region_name} Region Report\n")
+    lines.append("=" * separator_width + "\n\n")
+
+    lines.append(f"Analysis Window:        {region_window[0]} to {region_window[1]}\n")
+
+    # Add expected region info
+    if region_name == "NUE":
+        lines.append(
+            f"Expected Region:        {NUE_EXPECTED_START} to {NUE_EXPECTED_END}\n"
+        )
+    elif region_name == "CE":
+        lines.append(
+            f"Expected Region:        {CE_EXPECTED_START} to {CE_EXPECTED_END}\n"
+        )
+
+    lines.append("See 'analysis_overview.txt' for totals and accession breakdown.\n\n")
+
     lines.append(f"TOP {len(ranked_kmers)} K-MERS\n")
-    lines.append("-" * 80 + "\n")
+    lines.append("-" * separator_width + "\n")
 
     if not ranked_kmers:
         lines.append("No k-mers found.\n")
     else:
-        kmer_size = len(ranked_kmers[0]["kmer"])
-
-        # Calculate column widths
-        header_kmers = {
+        header = {
             "kmer": "K-mer",
             "delta": "Delta",
             "peak": "Peak Count",
             "median": "Median Count",
             "pos": "Peak Pos",
+            "presence": "Presence Count",
+            "pct": "% Occurrence",
         }
 
-        max_widths_kmers = {
-            "kmer": max(kmer_size, len(header_kmers["kmer"])),
-            "delta": len(header_kmers["delta"]),
-            "peak": len(header_kmers["peak"]),
-            "median": len(header_kmers["median"]),
-            "pos": len(header_kmers["pos"]),
+        maxw = {
+            "kmer": max(kmer_size, len(header["kmer"])),
+            "delta": len(header["delta"]),
+            "peak": len(header["peak"]),
+            "median": len(header["median"]),
+            "pos": len(header["pos"]),
+            "presence": len(header["presence"]),
+            "pct": len(header["pct"]),
         }
 
         for item in ranked_kmers:
-            max_widths_kmers["delta"] = max(
-                max_widths_kmers["delta"], len(f"{item['delta']:.1f}")
-            )
-            max_widths_kmers["peak"] = max(
-                max_widths_kmers["peak"], len(f"{item['peak_count']:,}")
-            )
-            max_widths_kmers["median"] = max(
-                max_widths_kmers["median"], len(f"{item['median_count']:.1f}")
-            )
-            max_widths_kmers["pos"] = max(
-                max_widths_kmers["pos"], len(str(item["peak_pos"]))
-            )
+            maxw["delta"] = max(maxw["delta"], len(f"{item['delta']:.1f}"))
+            maxw["peak"] = max(maxw["peak"], len(f"{item['peak_count']:,}"))
+            maxw["median"] = max(maxw["median"], len(f"{item['median_count']:.1f}"))
+            maxw["pos"] = max(maxw["pos"], len(str(item["peak_pos"])))
+            maxw["presence"] = max(maxw["presence"], len(f"{item['presence_count']:,}"))
+            maxw["pct"] = max(maxw["pct"], len(f"{item['pct_occurrence']:.1f}%"))
 
-        fmt_string_kmers = (
-            f"{{kmer:<{max_widths_kmers['kmer']}}} | "
-            f"{{delta:>{max_widths_kmers['delta']}}} | "
-            f"{{peak:>{max_widths_kmers['peak']}}} | "
-            f"{{median:>{max_widths_kmers['median']}}} | "
-            f"{{pos:>{max_widths_kmers['pos']}}}"
+        fmt = (
+            f"{{kmer:<{maxw['kmer']}}} | "
+            f"{{delta:>{maxw['delta']}}} | "
+            f"{{peak:>{maxw['peak']}}} | "
+            f"{{median:>{maxw['median']}}} | "
+            f"{{pos:>{maxw['pos']}}} | "
+            f"{{presence:>{maxw['presence']}}} | "
+            f"{{pct:>{maxw['pct']}}}"
+        )
+        sep = (
+            f"{'-' * maxw['kmer']} | "
+            f"{'-' * maxw['delta']} | "
+            f"{'-' * maxw['peak']} | "
+            f"{'-' * maxw['median']} | "
+            f"{'-' * maxw['pos']} | "
+            f"{'-' * maxw['presence']} | "
+            f"{'-' * maxw['pct']}"
         )
 
-        separator_kmers = (
-            f"{'-' * max_widths_kmers['kmer']} | "
-            f"{'-' * max_widths_kmers['delta']} | "
-            f"{'-' * max_widths_kmers['peak']} | "
-            f"{'-' * max_widths_kmers['median']} | "
-            f"{'-' * max_widths_kmers['pos']}"
-        )
-
-        lines.append(fmt_string_kmers.format(**header_kmers) + "\n")
-        lines.append(separator_kmers + "\n")
-
+        lines.append(fmt.format(**header) + "\n")
+        lines.append(sep + "\n")
         for item in ranked_kmers:
             lines.append(
-                fmt_string_kmers.format(
+                fmt.format(
                     kmer=item["kmer"],
                     delta=f"{item['delta']:.1f}",
                     peak=f"{item['peak_count']:,}",
                     median=f"{item['median_count']:.1f}",
                     pos=str(item["peak_pos"]),
+                    presence=f"{item['presence_count']:,}",
+                    pct=f"{item['pct_occurrence']:.1f}%",
                 )
                 + "\n"
             )
 
     lines.append("\n")
-    lines.append("=" * 80 + "\n")
+    lines.append("=" * separator_width + "\n")
 
     with open(out_fpath, "w") as f:
         f.writelines(lines)
-
-    print(f"Report saved to '{out_fpath}'")
+    print(f"{region_name} report saved to '{out_fpath}'")
 
 
 # --- STANDALONE EXECUTION ---

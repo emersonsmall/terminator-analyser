@@ -101,7 +101,7 @@ def _get_args() -> argparse.Namespace:
         parser.error(
             f"Input directory '{args.input_dir}' does not exist or is not a directory."
         )
-    
+
     return args
 
 
@@ -132,7 +132,7 @@ def _is_internal_priming_artifact(
     if consecutive_a == 0 and total_a == 0:
         return False
 
-    region_to_check = downstream_sequence[:window_size].upper()
+    region_to_check = downstream_sequence[:window_size]
 
     if consecutive_a > 0 and "A" * consecutive_a in region_to_check:
         return True
@@ -209,10 +209,10 @@ def _extract_terminator(
         term_seq = downstream_seq + full_utr
         term_seq = pyfaidx.Sequence(seq=term_seq).reverse.complement.seq
 
-    return term_seq
+    return term_seq.upper()
 
 
-def _filter_sequence(term_seq: str, args: argparse.Namespace) -> bool:
+def _passes_filter(term_seq: str, args: argparse.Namespace) -> bool:
     """
     Applies filters to the terminator sequence.
 
@@ -223,12 +223,12 @@ def _filter_sequence(term_seq: str, args: argparse.Namespace) -> bool:
     if args.raw_dna:
         return True
 
-    final_downstream_seq = term_seq[-args.num_downstream_nts :]
-    if len(final_downstream_seq) < args.filter_window_size:
+    downstream_seq = term_seq[-args.num_downstream_nts :]
+    if len(downstream_seq) < args.filter_window_size:
         return False
 
     if _is_internal_priming_artifact(
-        final_downstream_seq,
+        downstream_seq,
         args.filter_consecutive_a,
         args.filter_window_a,
         args.filter_window_size,
@@ -255,21 +255,24 @@ def _process_transcript(
             try:
                 parent_gene = list(db.parents(tscript))[0]
                 if not cds_features:
-                    cds_features = list(db.children(parent_gene, featuretype="CDS", order_by="start"))
+                    cds_features = list(
+                        db.children(parent_gene, featuretype="CDS", order_by="start")
+                    )
                 if not exon_features:
-                    exon_features = list(db.children(parent_gene, featuretype="exon", order_by="start"))
+                    exon_features = list(
+                        db.children(parent_gene, featuretype="exon", order_by="start")
+                    )
             except (IndexError, StopIteration):
                 pass
 
         if not cds_features or not exon_features:
             return None
 
-
         term_seq = _extract_terminator(
             tscript, fasta, cds_features, exon_features, args.num_downstream_nts
         )
 
-        if not term_seq or not _filter_sequence(term_seq, args):
+        if not term_seq or not _passes_filter(term_seq, args):
             return None
 
         return _format_fasta_record(tscript, term_seq, args.raw_dna)
@@ -306,7 +309,9 @@ def _extract_all_terminators(file_pair: tuple, args: argparse.Namespace) -> None
     # skip if terminator fasta already exists (unless --force specified)
     force = getattr(args, "force", False)
     if not force and os.path.isfile(terminators_fpath):
-        print(f"{accession} terminators already exist at '{terminators_fpath}', skipping")
+        print(
+            f"{accession} terminators already exist at '{terminators_fpath}', skipping"
+        )
         return
 
     print(f"Processing genome {accession}")
@@ -317,7 +322,6 @@ def _extract_all_terminators(file_pair: tuple, args: argparse.Namespace) -> None
     os.makedirs(db_dir, exist_ok=True)
 
     db_fpath = os.path.join(db_dir, f"{accession}.db")
-
 
     fasta = pyfaidx.Fasta(fasta_fpath)
     db = _create_gff_db(annotation_fpath, db_fpath)
@@ -373,7 +377,6 @@ def _format_fasta_record(
 
     header = f">{display_id} | {tscript.chrom}:{tscript.start}-{tscript.end}({tscript.strand})"
 
-    term_seq = term_seq.upper()
     if not raw_dna:
         term_seq = term_seq.replace("T", "U")
     wrapped_seq = textwrap.fill(term_seq, width=80)
@@ -381,7 +384,9 @@ def _format_fasta_record(
     return f"{header}\n{wrapped_seq}\n"
 
 
-def _get_file_pairs(dir: str, included_accessions: set[str] | None) -> list[tuple[str, str]]:
+def _get_file_pairs(
+    dir: str, included_accessions: set[str] | None
+) -> list[tuple[str, str]]:
     """
     Searches the given directory for matching pairs of FASTA and GFF files.
 

@@ -69,7 +69,9 @@ def main():
             run_extraction(args)
 
             args.input_path = args.terminators_dir
-            args.results_dir = os.path.join(args.results_dir, args.taxon.replace(" ", "_"))
+            args.results_dir = os.path.join(
+                args.results_dir, args.taxon.replace(" ", "_")
+            )
 
             print("\nANALYSING TERMINATORS")
             run_analysis(args)
