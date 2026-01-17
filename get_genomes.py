@@ -6,6 +6,7 @@ import requests
 import zipfile
 import tempfile
 import shutil
+import traceback
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from urllib.parse import quote
@@ -29,7 +30,7 @@ def main():
     run_get_genomes(_get_args())
 
 
-def run_get_genomes(args: argparse.Namespace) -> set[str] | None:
+def run_get_genomes(args: argparse.Namespace) -> dict[str, str] | None:
     try:
         return _get_genomes_by_taxon(
             args.taxon,
@@ -40,8 +41,8 @@ def run_get_genomes(args: argparse.Namespace) -> set[str] | None:
             args.exclude_accessions,
         )
 
-    except Exception as e:
-        print(f"ERROR: {e}", file=sys.stderr)
+    except Exception:
+        print(f"ERROR: {traceback.format_exc()}", file=sys.stderr)
 
 
 def _exclude_accessions_arg(val: str) -> set[str]:
@@ -111,7 +112,7 @@ def _get_genomes_by_taxon(
     max_genomes: int | None,
     force: bool,
     exclude_accessions: set[str],
-) -> set[str]:
+) -> dict[str, str]:
     """
     Downloads and extracts all reference genomes (.fna & annotation) for the given taxon.
     """
@@ -126,13 +127,13 @@ def _get_genomes_by_taxon(
         if not dataset_reports:
             raise Exception(f"No reference genomes found for taxon '{taxon}'")
 
-        print(f"\nFound {len(dataset_reports)} reference genome/s for '{taxon}':")
+        print(f"Found {len(dataset_reports)} reference genome/s for '{taxon}':")
         _print_found_genomes(dataset_reports)
 
         os.makedirs(output_dir, exist_ok=True)
 
         num_genomes = len(dataset_reports)
-        accessions = set()
+        genomes = {} # {accession: organism_name}
         num_downloaded = 0
 
         for i, report in enumerate(dataset_reports, start=1):
@@ -142,12 +143,13 @@ def _get_genomes_by_taxon(
                 print(f"{accession} is in exclude list, skipping")
                 continue
 
+            organism_name = report.get("organism").get("organism_name", "N/A")
+
             if not force and _genome_files_exist(output_dir, accession):
                 print(f"{accession} already exists at '{output_dir}', skipping")
-                accessions.add(accession)
+                genomes[accession] = organism_name
                 continue
 
-            organism_name = report.get("organism").get("organism_name", "N/A")
             print(
                 f"\nDownloading genome {i}/{num_genomes}: {organism_name} ({accession})"
             )
@@ -175,12 +177,12 @@ def _get_genomes_by_taxon(
             download_url = f"{ACCESSION_ENDPOINT}/{quote(accession)}/download?include_annotation_type={','.join(files_to_request)}"
             _download_and_extract(session, download_url, api_key, output_dir, accession)
             num_downloaded += 1
-            accessions.add(accession)
+            genomes[accession] = organism_name
 
         if num_downloaded > 0:
             print(f"\nDownloaded {num_downloaded} genome/s to: '{output_dir}'")
 
-        return accessions
+        return genomes
 
     finally:
         session.close()
@@ -355,37 +357,37 @@ def _genome_files_exist(dir_path: str, accession: str) -> bool:
 def _print_found_genomes(reports: list) -> None:
     # Prepare data and find max widths for column alignment
     header = {
+        "accession": "Accession",
         "organism": "Organism name",
         "common": "Common name",
-        "accession": "Accession",
     }
     data = []
     max_widths = {key: len(value) for key, value in header.items()}
 
     for report in reports:
+        accession = report.get("accession")
         organism_name = report.get("organism", {}).get("organism_name", "N/A")
         common_name = report.get("organism", {}).get("common_name", "N/A")
-        accession = report.get("accession")
 
         data.append(
-            {"organism": organism_name, "common": common_name, "accession": accession}
+            {"accession": accession, "organism": organism_name, "common": common_name}
         )
 
+        max_widths["accession"] = max(max_widths["accession"], len(accession))
         max_widths["organism"] = max(max_widths["organism"], len(organism_name))
         max_widths["common"] = max(max_widths["common"], len(common_name))
-        max_widths["accession"] = max(max_widths["accession"], len(accession))
 
     # Create a format string based on the calculated max widths
     fmt_string = (
+        f"{{accession:<{max_widths['accession']}}} | "
         f"{{organism:<{max_widths['organism']}}} | "
-        f"{{common:<{max_widths['common']}}} | "
-        f"{{accession:<{max_widths['accession']}}}"
+        f"{{common:<{max_widths['common']}}}"
     )
 
     separator = (
+        f"{'-' * max_widths['accession']} | "
         f"{'-' * max_widths['organism']} | "
-        f"{'-' * max_widths['common']} | "
-        f"{'-' * max_widths['accession']}"
+        f"{'-' * max_widths['common']}"
     )
 
     print(fmt_string.format(**header))

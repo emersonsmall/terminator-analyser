@@ -59,13 +59,13 @@ def main():
 
         elif args.command == "full":
             print("\nGETTING GENOMES")
-            accessions = run_get_genomes(args)
-            if not accessions:
-                print("\nERROR: No accessions to process.", file=sys.stderr)
+            genomes = run_get_genomes(args)
+            if not genomes:
+                print("\nERROR: No genomes to process.", file=sys.stderr)
                 sys.exit(1)
 
             args.input_dir = args.genomes_dir
-            args.accessions = accessions
+            args.genomes = genomes
 
             print("\nEXTRACTING TERMINATORS")
             run_extraction(args)

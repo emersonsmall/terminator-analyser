@@ -48,8 +48,8 @@ def run_analysis(args: argparse.Namespace) -> None:
         # Find all fasta files
         fasta_files = []
         if os.path.isdir(args.input_path):
-            accessions = getattr(args, "accessions", None)
-            fasta_files = _get_fasta_files(args.input_path, accessions)
+            genomes = getattr(args, "genomes", {})
+            fasta_files = _get_fasta_files(args.input_path, list(genomes.keys()))
             print(f"Found {len(fasta_files)} FASTA files")
         elif os.path.isfile(args.input_path):
             fasta_files = [args.input_path]
@@ -59,6 +59,7 @@ def run_analysis(args: argparse.Namespace) -> None:
                 f"ERROR: No valid FASTA file/s found at path '{args.input_path}'",
                 file=sys.stderr,
             )
+            sys.exit(1)
 
         # process each file in parallel
         worker = partial(_process_terminator_fasta, args=args)
@@ -71,7 +72,6 @@ def run_analysis(args: argparse.Namespace) -> None:
         accession_info = {}
 
         # TODO: do window occurrence counts need to be separate? - probably because the % occurrence is based on the window
-        # TODO: add organism names onto args from get_genome (like accessions)
 
         with Pool() as pool:
             for result in pool.imap_unordered(worker, fasta_files):
@@ -89,7 +89,7 @@ def run_analysis(args: argparse.Namespace) -> None:
                 _merge_counts(total_nue_counts, nue_counts)
                 _merge_counts(total_ce_counts, ce_counts)
 
-                # merge presence counts
+                # merge occurrence counts
                 for kmer, count in nue_occurrence_counts.items():
                     total_nue_occurrence_counts[kmer] = total_nue_occurrence_counts.get(kmer, 0) + count
                 for kmer, count in ce_occurrence_counts.items():
@@ -98,7 +98,7 @@ def run_analysis(args: argparse.Namespace) -> None:
                 total_skipped += num_skipped
                 total_terminators += num_terminators
                 accession_info[accession] = {
-                    "organism_name": "",
+                    "organism_name": args.genomes.get(accession, "Unknown"),
                     "total": num_terminators,
                     "included": num_terminators - num_skipped,
                     "skipped": num_skipped,
@@ -110,17 +110,17 @@ def run_analysis(args: argparse.Namespace) -> None:
         # calculate % occurrence for top kmers
         total_included = total_terminators - total_skipped
         for kmer_info in top_nue_kmers:
-            presence_count = total_nue_occurrence_counts.get(kmer_info["kmer"], 0)
-            kmer_info["presence_count"] = presence_count
+            occurrence_count = total_nue_occurrence_counts.get(kmer_info["kmer"], 0)
+            kmer_info["occurrence_count"] = occurrence_count
             kmer_info["pct_occurrence"] = (
-                (presence_count / total_included * 100) if total_included > 0 else 0
+                (occurrence_count / total_included * 100) if total_included > 0 else 0
             )
 
         for kmer_info in top_ce_kmers:
-            presence_count = total_ce_occurrence_counts.get(kmer_info["kmer"], 0)
-            kmer_info["presence_count"] = presence_count
+            occurrence_count = total_ce_occurrence_counts.get(kmer_info["kmer"], 0)
+            kmer_info["occurrence_count"] = occurrence_count
             kmer_info["pct_occurrence"] = (
-                (presence_count / total_included * 100) if total_included > 0 else 0
+                (occurrence_count / total_included * 100) if total_included > 0 else 0
             )
 
         os.makedirs(args.results_dir, exist_ok=True)
@@ -382,7 +382,7 @@ def _process_terminator_fasta(fasta_fpath: str, args: argparse.Namespace) -> tup
 
         terminators.append(seq)
 
-    nue_counts, nue_presence = _count_kmers(
+    nue_counts, nue_occurrence_counts = _count_kmers(
         terminators,
         (NUE_ANALYSIS_WINDOW_START, NUE_ANALYSIS_WINDOW_END),
         args.kmer_size,
@@ -390,7 +390,7 @@ def _process_terminator_fasta(fasta_fpath: str, args: argparse.Namespace) -> tup
         args.step_size,
         (NUE_EXPECTED_START, NUE_EXPECTED_END),
     )
-    ce_counts, ce_presence = _count_kmers(
+    ce_counts, ce_occurrence_counts = _count_kmers(
         terminators,
         (CE_ANALYSIS_WINDOW_START, CE_ANALYSIS_WINDOW_END),
         args.kmer_size,
@@ -402,8 +402,8 @@ def _process_terminator_fasta(fasta_fpath: str, args: argparse.Namespace) -> tup
     return (
         nue_counts,
         ce_counts,
-        nue_presence,
-        ce_presence,
+        nue_occurrence_counts,
+        ce_occurrence_counts,
         num_skipped,
         num_terminators,
         accession,
@@ -487,7 +487,7 @@ def _rank_kmers(kmer_counts: dict, n: int) -> list:
 
 
 # --- HELPER FUNCTIONS ---
-def _get_fasta_files(input_dir: str, accessions: set[str] | None) -> list[str]:
+def _get_fasta_files(input_dir: str, accessions: list[str]) -> list[str]:
     assert os.path.isdir(input_dir), f"Input path '{input_dir}' is not a directory."
 
     candidates = glob.glob(os.path.join(input_dir, "*.fa"))
@@ -791,7 +791,7 @@ def _save_region_report(
             "peak": "Peak Count",
             "median": "Median Count",
             "pos": "Peak Pos",
-            "presence": "Presence Count",
+            "occurrences": "Occurrence Count",
             "pct": "% Occurrence",
         }
 
@@ -801,7 +801,7 @@ def _save_region_report(
             "peak": len(header["peak"]),
             "median": len(header["median"]),
             "pos": len(header["pos"]),
-            "presence": len(header["presence"]),
+            "occurrences": len(header["occurrences"]),
             "pct": len(header["pct"]),
         }
 
@@ -810,7 +810,7 @@ def _save_region_report(
             maxw["peak"] = max(maxw["peak"], len(f"{item['peak_count']:,}"))
             maxw["median"] = max(maxw["median"], len(f"{item['median_count']:.1f}"))
             maxw["pos"] = max(maxw["pos"], len(str(item["peak_pos"])))
-            maxw["presence"] = max(maxw["presence"], len(f"{item['presence_count']:,}"))
+            maxw["occurrences"] = max(maxw["occurrences"], len(f"{item['occurrence_count']:,}"))
             maxw["pct"] = max(maxw["pct"], len(f"{item['pct_occurrence']:.1f}%"))
 
         fmt = (
@@ -819,7 +819,7 @@ def _save_region_report(
             f"{{peak:>{maxw['peak']}}} | "
             f"{{median:>{maxw['median']}}} | "
             f"{{pos:>{maxw['pos']}}} | "
-            f"{{presence:>{maxw['presence']}}} | "
+            f"{{occurrences:>{maxw['occurrences']}}} | "
             f"{{pct:>{maxw['pct']}}}"
         )
         sep = (
@@ -828,7 +828,7 @@ def _save_region_report(
             f"{'-' * maxw['peak']} | "
             f"{'-' * maxw['median']} | "
             f"{'-' * maxw['pos']} | "
-            f"{'-' * maxw['presence']} | "
+            f"{'-' * maxw['occurrences']} | "
             f"{'-' * maxw['pct']}"
         )
 
@@ -842,7 +842,7 @@ def _save_region_report(
                     peak=f"{item['peak_count']:,}",
                     median=f"{item['median_count']:.1f}",
                     pos=str(item["peak_pos"]),
-                    presence=f"{item['presence_count']:,}",
+                    occurrences=f"{item['occurrence_count']:,}",
                     pct=f"{item['pct_occurrence']:.1f}%",
                 )
                 + "\n"

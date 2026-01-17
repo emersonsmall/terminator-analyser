@@ -19,31 +19,26 @@ from get_genomes import VALID_FASTA_EXTS, VALID_ANNOTATION_EXTS
 
 class NoUTRException(Exception):
     """Raised when a transcript has no implied 3' UTR based on CDS and exon coordinates."""
-
     pass
 
 
 class InvalidStrandException(Exception):
     """Raised when a transcript has an invalid or unknown strand."""
-
     pass
 
 
 class NoCDSException(Exception):
     """Raised when a transcript has no CDS features."""
-
     pass
 
 
 class NoExonException(Exception):
     """Raised when a transcript has no exon features."""
-
     pass
 
 
 class FailedFilterException(Exception):
     """Raised when a terminator sequence fails filtering criteria."""
-
     pass
 
 
@@ -53,8 +48,8 @@ def main() -> None:
 
 def run_extraction(args: argparse.Namespace) -> None:
     try:
-        accessions = getattr(args, "accessions", None)
-        file_pairs = _get_file_pairs(args.input_dir, accessions)
+        genomes = getattr(args, "genomes", {})
+        file_pairs = _get_file_pairs(args.input_dir, list(genomes.keys()))
 
         # process each genome in parallel
         worker = partial(_extract_all_terminators, args=args)
@@ -218,7 +213,7 @@ def _passes_filter(term_seq: str, args: argparse.Namespace) -> bool:
     Applies filters to the terminator sequence.
 
     Returns:
-        True if the sequence passes the filters, False otherwise.
+        True, if the sequence passes the filters, False otherwise.
     """
 
     if args.raw_dna:
@@ -304,7 +299,7 @@ def _extract_all_terminators(file_pair: tuple, args: argparse.Namespace) -> dict
     os.makedirs(args.terminators_dir, exist_ok=True)
     terminators_fpath = os.path.join(args.terminators_dir, f"{accession}.fa")
 
-    # skip if terminator fasta already exists (unless --force specified)
+    # skip if terminator fasta already exists
     force = getattr(args, "force", False)
     if not force and os.path.isfile(terminators_fpath):
         print(
@@ -443,7 +438,7 @@ def _format_fasta_record(
 
 
 def _get_file_pairs(
-    dir: str, accessions: set[str] | None
+    dir: str, accessions: list[str]
 ) -> list[tuple[str, str]]:
     """
     Searches the given directory for matching pairs of FASTA and GFF files.
@@ -462,7 +457,7 @@ def _get_file_pairs(
     for filename in os.listdir(dir):
         basename, ext = os.path.splitext(filename)
 
-        # if 'full' execution, filter by included accessions. Otherwise, include all valid files in input directory
+        # if 'full' execution, only add files in accessions list. Otherwise, include all valid files in input directory
         if accessions and basename not in accessions:
             continue
 
