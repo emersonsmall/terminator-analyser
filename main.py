@@ -2,7 +2,6 @@
 import argparse
 import sys
 import os
-import traceback
 
 # Local modules
 from get_genomes import run_get_genomes, add_get_args
@@ -59,13 +58,12 @@ def main():
 
         elif args.command == "full":
             print("\nGETTING GENOMES")
-            accessions = run_get_genomes(args)
-            if not accessions:
+            included_accessions = run_get_genomes(args)
+            if not included_accessions:
                 print("\nERROR: No accessions to process.", file=sys.stderr)
-                sys.exit(1)
 
             args.input_dir = args.genomes_dir
-            args.accessions = accessions
+            args.included_accessions = included_accessions
 
             print("\nEXTRACTING TERMINATORS")
             run_extraction(args)
@@ -78,9 +76,8 @@ def main():
             print("\nANALYSING TERMINATORS")
             run_analysis(args)
 
-    except Exception:
-        print(f"\nERROR: {traceback.format_exc()}", file=sys.stderr)
-        sys.exit(1)
+    except Exception as e:
+        print(f"\nERROR: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

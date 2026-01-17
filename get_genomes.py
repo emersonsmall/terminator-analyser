@@ -12,8 +12,8 @@ from urllib.parse import quote
 
 
 NCBI_DATASETS_API_BASE_URL = "https://api.ncbi.nlm.nih.gov/datasets/v2"
-TAXON_ENDPOINT = f"{NCBI_DATASETS_API_BASE_URL}/genome/taxon"
-ACCESSION_ENDPOINT = f"{NCBI_DATASETS_API_BASE_URL}/genome/accession"
+TAXON_BASE_URL = f"{NCBI_DATASETS_API_BASE_URL}/genome/taxon"
+ACCESSION_BASE_URL = f"{NCBI_DATASETS_API_BASE_URL}/genome/accession"
 DATASET_REPORT_FILTERS = ("filters.reference_only=true",)
 
 RETRIES = 3
@@ -113,12 +113,12 @@ def _get_genomes_by_taxon(
     exclude_accessions: set[str],
 ) -> set[str]:
     """
-    Downloads and extracts all reference genomes (.fna & annotation) for the given taxon.
+    Downloads and extracts all reference genomes for the given taxon.
     """
 
     session = _build_session()
     try:
-        dataset_report_url = f"{TAXON_ENDPOINT}/{quote(taxon)}/dataset_report?{','.join(DATASET_REPORT_FILTERS)}"
+        dataset_report_url = f"{TAXON_BASE_URL}/{quote(taxon)}/dataset_report?{','.join(DATASET_REPORT_FILTERS)}"
         dataset_reports = _fetch_all_pages(
             session, dataset_report_url, api_key, max_genomes
         )
@@ -132,7 +132,7 @@ def _get_genomes_by_taxon(
         os.makedirs(output_dir, exist_ok=True)
 
         num_genomes = len(dataset_reports)
-        accessions = set()
+        included_accessions = set()
         num_downloaded = 0
 
         for i, report in enumerate(dataset_reports, start=1):
@@ -144,7 +144,7 @@ def _get_genomes_by_taxon(
 
             if not force and _genome_files_exist(output_dir, accession):
                 print(f"{accession} already exists at '{output_dir}', skipping")
-                accessions.add(accession)
+                included_accessions.add(accession)
                 continue
 
             organism_name = report.get("organism").get("organism_name", "N/A")
@@ -154,7 +154,7 @@ def _get_genomes_by_taxon(
 
             # check if GFF or GTF annotation is available. GFF preferred
             download_summary_url = (
-                f"{ACCESSION_ENDPOINT}/{quote(accession)}/download_summary"
+                f"{ACCESSION_BASE_URL}/{quote(accession)}/download_summary"
             )
             download_summary = _api_request(session, download_summary_url, api_key)
 
@@ -172,15 +172,15 @@ def _get_genomes_by_taxon(
             else:
                 files_to_request.append("GENOME_GTF")
 
-            download_url = f"{ACCESSION_ENDPOINT}/{quote(accession)}/download?include_annotation_type={','.join(files_to_request)}"
+            download_url = f"{ACCESSION_BASE_URL}/{quote(accession)}/download?include_annotation_type={','.join(files_to_request)}"
             _download_and_extract(session, download_url, api_key, output_dir, accession)
             num_downloaded += 1
-            accessions.add(accession)
+            included_accessions.add(accession)
 
         if num_downloaded > 0:
             print(f"\nDownloaded {num_downloaded} genome/s to: '{output_dir}'")
 
-        return accessions
+        return included_accessions
 
     finally:
         session.close()
