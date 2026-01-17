@@ -53,8 +53,8 @@ def main() -> None:
 
 def run_extraction(args: argparse.Namespace) -> None:
     try:
-        included_accessions = getattr(args, "included_accessions", None)
-        file_pairs = _get_file_pairs(args.input_dir, included_accessions)
+        accessions = getattr(args, "accessions", None)
+        file_pairs = _get_file_pairs(args.input_dir, accessions)
 
         # process each genome in parallel
         worker = partial(_extract_all_terminators, args=args)
@@ -112,7 +112,7 @@ def add_extract_args(
     )
     parser.add_argument(
         "-d",
-        "--num-downstream-nts",
+        "--num-downstream-nt",
         type=int,
         default=50,
         help="Number of nucleotides downstream of the CS to extract (default: 50).",
@@ -151,7 +151,7 @@ def _extract_terminator(
     fasta: pyfaidx.Fasta,
     cds_features: list,
     exon_features: list,
-    num_downstream_nts: int,
+    num_downstream_nt: int,
 ) -> str:
     """
     Extracts the terminator sequence for a given transcript feature.
@@ -175,7 +175,7 @@ def _extract_terminator(
                 utr_parts.append(fasta[tscript.chrom][utr_start - 1 : utr_end].seq)
 
         downstream_start = tscript.end + 1
-        downstream_end = tscript.end + num_downstream_nts
+        downstream_end = tscript.end + num_downstream_nt
 
     elif tscript.strand == "-":
         cds_start = cds_features[0].start
@@ -187,7 +187,7 @@ def _extract_terminator(
                 utr_end = min(exon.end, cds_start - 1)
                 utr_parts.append(fasta[tscript.chrom][utr_start - 1 : utr_end].seq)
 
-        downstream_start = max(1, tscript.start - num_downstream_nts)
+        downstream_start = max(1, tscript.start - num_downstream_nt)
         downstream_end = tscript.start - 1
 
     else:
@@ -224,7 +224,7 @@ def _passes_filter(term_seq: str, args: argparse.Namespace) -> bool:
     if args.raw_dna:
         return True
 
-    downstream_seq = term_seq[-args.num_downstream_nts :]
+    downstream_seq = term_seq[-args.num_downstream_nt :]
     if len(downstream_seq) < args.filter_window_size:
         return False
 
@@ -271,7 +271,7 @@ def _process_transcript(
         raise NoCDSException(f"Transcript '{tscript.id}' has no CDS features.")
 
     term_seq = _extract_terminator(
-        tscript, fasta, cds_features, exon_features, args.num_downstream_nts
+        tscript, fasta, cds_features, exon_features, args.num_downstream_nt
     )
 
     if not _passes_filter(term_seq, args):
@@ -443,7 +443,7 @@ def _format_fasta_record(
 
 
 def _get_file_pairs(
-    dir: str, included_accessions: set[str] | None
+    dir: str, accessions: set[str] | None
 ) -> list[tuple[str, str]]:
     """
     Searches the given directory for matching pairs of FASTA and GFF files.
@@ -462,8 +462,8 @@ def _get_file_pairs(
     for filename in os.listdir(dir):
         basename, ext = os.path.splitext(filename)
 
-        # if 'full' execution, filter by included accessions. Otherwise, include all valid files in dir
-        if included_accessions and basename not in included_accessions:
+        # if 'full' execution, filter by included accessions. Otherwise, include all valid files in input directory
+        if accessions and basename not in accessions:
             continue
 
         ext = ext.lower()

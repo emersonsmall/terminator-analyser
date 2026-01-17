@@ -8,6 +8,7 @@ import statistics
 from multiprocessing import Pool
 from functools import partial
 import datetime
+import traceback
 
 # External libraries
 import pyfaidx
@@ -47,8 +48,8 @@ def run_analysis(args: argparse.Namespace) -> None:
         # Find all fasta files
         fasta_files = []
         if os.path.isdir(args.input_path):
-            included_accessions = getattr(args, "included_accessions", None)
-            fasta_files = _get_fasta_files(args.input_path, included_accessions)
+            accessions = getattr(args, "accessions", None)
+            fasta_files = _get_fasta_files(args.input_path, accessions)
             print(f"Found {len(fasta_files)} FASTA files")
         elif os.path.isfile(args.input_path):
             fasta_files = [args.input_path]
@@ -63,19 +64,22 @@ def run_analysis(args: argparse.Namespace) -> None:
         worker = partial(_process_terminator_fasta, args=args)
         total_nue_counts = {}
         total_ce_counts = {}
-        total_nue_presence = {}
-        total_ce_presence = {}
+        total_nue_occurrence_counts = {}
+        total_ce_occurrence_counts = {}
         total_skipped = 0
         total_terminators = 0
-        accession_stats = {}
+        accession_info = {}
+
+        # TODO: do window occurrence counts need to be separate? - probably because the % occurrence is based on the window
+        # TODO: add organism names onto args from get_genome (like accessions)
 
         with Pool() as pool:
             for result in pool.imap_unordered(worker, fasta_files):
                 (
                     nue_counts,
                     ce_counts,
-                    nue_presence,
-                    ce_presence,
+                    nue_occurrence_counts,
+                    ce_occurrence_counts,
                     num_skipped,
                     num_terminators,
                     accession,
@@ -86,14 +90,15 @@ def run_analysis(args: argparse.Namespace) -> None:
                 _merge_counts(total_ce_counts, ce_counts)
 
                 # merge presence counts
-                for kmer, count in nue_presence.items():
-                    total_nue_presence[kmer] = total_nue_presence.get(kmer, 0) + count
-                for kmer, count in ce_presence.items():
-                    total_ce_presence[kmer] = total_ce_presence.get(kmer, 0) + count
+                for kmer, count in nue_occurrence_counts.items():
+                    total_nue_occurrence_counts[kmer] = total_nue_occurrence_counts.get(kmer, 0) + count
+                for kmer, count in ce_occurrence_counts.items():
+                    total_ce_occurrence_counts[kmer] = total_ce_occurrence_counts.get(kmer, 0) + count
 
                 total_skipped += num_skipped
                 total_terminators += num_terminators
-                accession_stats[accession] = {
+                accession_info[accession] = {
+                    "organism_name": "",
                     "total": num_terminators,
                     "included": num_terminators - num_skipped,
                     "skipped": num_skipped,
@@ -105,16 +110,14 @@ def run_analysis(args: argparse.Namespace) -> None:
         # calculate % occurrence for top kmers
         total_included = total_terminators - total_skipped
         for kmer_info in top_nue_kmers:
-            kmer = kmer_info["kmer"]
-            presence_count = total_nue_presence.get(kmer, 0)
+            presence_count = total_nue_occurrence_counts.get(kmer_info["kmer"], 0)
             kmer_info["presence_count"] = presence_count
             kmer_info["pct_occurrence"] = (
                 (presence_count / total_included * 100) if total_included > 0 else 0
             )
 
         for kmer_info in top_ce_kmers:
-            kmer = kmer_info["kmer"]
-            presence_count = total_ce_presence.get(kmer, 0)
+            presence_count = total_ce_occurrence_counts.get(kmer_info["kmer"], 0)
             kmer_info["presence_count"] = presence_count
             kmer_info["pct_occurrence"] = (
                 (presence_count / total_included * 100) if total_included > 0 else 0
@@ -130,17 +133,17 @@ def run_analysis(args: argparse.Namespace) -> None:
             "generated_at": datetime.datetime.now(),
             "kmer_size": args.kmer_size,
             "min_3utr_length": args.min_3utr_length,
-            "num_downstream_nts": args.num_downstream_nts,
+            "num_downstream_nt": args.num_downstream_nt,
             "step_size": args.step_size,
             "total_terminators": total_terminators,
             "skipped_terminators": total_skipped,
             "included_terminators": total_terminators - total_skipped,
-            "num_accessions": len(accession_stats),
-            "accession_stats": accession_stats,
+            "num_accessions": len(accession_info),
+            "accession_info": accession_info,
             "extraction_stats": extraction_stats,
         }
 
-        _save_overall_report(
+        _save_overview_report(
             os.path.join(args.results_dir, "analysis_overview.txt"),
             report_metadata,
         )
@@ -179,12 +182,12 @@ def run_analysis(args: argparse.Namespace) -> None:
             ce_plot_path,
         )
 
-    except Exception as e:
-        print(f"ERROR: {e}", file=sys.stderr)
+    except Exception:
+        print(f"ERROR: {traceback.format_exc()}", file=sys.stderr)
 
 
 def add_analyse_args(
-    parser: argparse.ArgumentParser, is_standalone: bool = True
+    parser: argparse.ArgumentParser, is_standalone: bool = False
 ) -> None:
     """Adds command-line arguments for the `analyse` command to the given parser.
 
@@ -230,7 +233,7 @@ def add_analyse_args(
         )
         parser.add_argument(
             "-d",
-            "--downstream-nts",
+            "--num-downstream-nt",
             type=int,
             default=50,
             help="Number of nucleotides downstream of the CS included in the terminators (default: 50).",
@@ -248,7 +251,7 @@ def _get_args() -> argparse.Namespace:
         description="Analyses the NUE and CE regions of the given terminator sequences."
     )
 
-    add_analyse_args(parser)
+    add_analyse_args(parser, is_standalone=True)
 
     args = parser.parse_args()
 
@@ -260,7 +263,7 @@ def _get_args() -> argparse.Namespace:
             f"Minimum 3'UTR length must be at least {abs(NUE_ANALYSIS_WINDOW_START)}."
         )
 
-    if not args.num_downstream_nts >= CE_ANALYSIS_WINDOW_END:
+    if not args.num_downstream_nt >= CE_ANALYSIS_WINDOW_END:
         parser.error(f"Downstream nts must be at least {CE_ANALYSIS_WINDOW_END}.")
 
     return args
@@ -270,7 +273,7 @@ def _count_kmers(
     sequences: list[str],
     analysis_window: tuple[int, int],
     kmer_size: int,
-    num_downstream_nts: int,
+    num_downstream_nt: int,
     step_size: int,
     expected_region: tuple[int, int],
 ) -> tuple[dict, dict]:
@@ -317,7 +320,7 @@ def _count_kmers(
 
     for seq in sequences:
         seq_len = len(seq)
-        utr_len = seq_len - num_downstream_nts
+        utr_len = seq_len - num_downstream_nt
         seen_in_seq = set()
 
         for i in range(0, seq_len - kmer_size + 1, step_size):
@@ -371,7 +374,7 @@ def _process_terminator_fasta(fasta_fpath: str, args: argparse.Namespace) -> tup
 
         seq = str(record)
         total_len = len(seq)
-        utr_len = total_len - args.num_downstream_nts
+        utr_len = total_len - args.num_downstream_nt
 
         if utr_len < args.min_3utr_length:
             num_skipped += 1
@@ -383,7 +386,7 @@ def _process_terminator_fasta(fasta_fpath: str, args: argparse.Namespace) -> tup
         terminators,
         (NUE_ANALYSIS_WINDOW_START, NUE_ANALYSIS_WINDOW_END),
         args.kmer_size,
-        args.num_downstream_nts,
+        args.num_downstream_nt,
         args.step_size,
         (NUE_EXPECTED_START, NUE_EXPECTED_END),
     )
@@ -391,7 +394,7 @@ def _process_terminator_fasta(fasta_fpath: str, args: argparse.Namespace) -> tup
         terminators,
         (CE_ANALYSIS_WINDOW_START, CE_ANALYSIS_WINDOW_END),
         args.kmer_size,
-        args.num_downstream_nts,
+        args.num_downstream_nt,
         args.step_size,
         (CE_EXPECTED_START, CE_EXPECTED_END),
     )
@@ -484,7 +487,7 @@ def _rank_kmers(kmer_counts: dict, n: int) -> list:
 
 
 # --- HELPER FUNCTIONS ---
-def _get_fasta_files(input_dir: str, included_accessions: set[str] | None) -> list[str]:
+def _get_fasta_files(input_dir: str, accessions: set[str] | None) -> list[str]:
     assert os.path.isdir(input_dir), f"Input path '{input_dir}' is not a directory."
 
     candidates = glob.glob(os.path.join(input_dir, "*.fa"))
@@ -494,14 +497,14 @@ def _get_fasta_files(input_dir: str, included_accessions: set[str] | None) -> li
         base = os.path.basename(fpath)
         accession = os.path.splitext(base)[0]
         # if filter set provided, include only those accessions
-        if included_accessions and accession not in included_accessions:
+        if accessions and accession not in accessions:
             continue
         results.append(fpath)
 
     return results
 
 
-def _save_overall_report(out_fpath: str, metadata: dict) -> None:
+def _save_overview_report(out_fpath: str, metadata: dict) -> None:
     separator_width = 100
 
     lines = []
@@ -519,7 +522,7 @@ def _save_overall_report(out_fpath: str, metadata: dict) -> None:
     lines.append(f"K-mer Size:             {metadata['kmer_size']}\n")
     lines.append(f"Step Size:              {metadata['step_size']}\n")
     lines.append(f"Min 3'UTR Length:       {metadata['min_3utr_length']} nt\n")
-    lines.append(f"Num Downstream nt:      {metadata['num_downstream_nts']} nt\n")
+    lines.append(f"Num Downstream nt:      {metadata['num_downstream_nt']} nt\n")
     lines.append(f"Total Terminators:      {metadata['total_terminators']:,}\n")
     lines.append(f"Included Terminators:   {metadata['included_terminators']:,}\n")
     lines.append(f"Skipped Terminators:    {metadata['skipped_terminators']:,}\n")
@@ -532,15 +535,16 @@ def _save_overall_report(out_fpath: str, metadata: dict) -> None:
     lines.append(f"Number of Accessions:   {metadata['num_accessions']}\n")
     lines.append("\n")
 
-    accession_stats = metadata.get("accession_stats") or {}
+    accession_info = metadata.get("accession_info") or {}
     extraction_stats = metadata.get("extraction_stats") or {}
 
-    if accession_stats:
+    if accession_info:
         lines.append("TERMINATOR COUNTS BY ACCESSION\n")
         lines.append("-" * separator_width + "\n")
 
         header = {
             "accession": "Accession",
+            "organism": "Organism name",
             "total": "Total",
             "included": "Included",
             "skipped": "Skipped",
@@ -552,29 +556,24 @@ def _save_overall_report(out_fpath: str, metadata: dict) -> None:
 
         max_widths = {
             "accession": len(header["accession"]),
+            "organism": len(header["organism"]),
             "total": len(header["total"]),
             "included": len(header["included"]),
             "skipped": len(header["skipped"]),
             "pct": len(header["pct"]),
         }
 
-        for accession, stats in accession_stats.items():
+        for accession, info in accession_info.items():
             max_widths["accession"] = max(max_widths["accession"], len(accession))
-            max_widths["total"] = max(max_widths["total"], len(f"{stats['total']:,}"))
-            max_widths["included"] = max(
-                max_widths["included"], len(f"{stats['included']:,}")
-            )
-            max_widths["skipped"] = max(
-                max_widths["skipped"], len(f"{stats['skipped']:,}")
-            )
+            max_widths["organism"] = max(max_widths["organism"], len(info["organism_name"]))
 
-        max_widths["accession"] = max(max_widths["accession"], len("TOTAL"))
         max_widths["total"] = max(max_widths["total"], len(f"{total_all:,}"))
         max_widths["included"] = max(max_widths["included"], len(f"{total_included:,}"))
         max_widths["skipped"] = max(max_widths["skipped"], len(f"{total_skipped:,}"))
 
         fmt = (
             f"{{accession:<{max_widths['accession']}}} | "
+            f"{{organism:<{max_widths['organism']}}} | "
             f"{{total:>{max_widths['total']}}} | "
             f"{{included:>{max_widths['included']}}} | "
             f"{{skipped:>{max_widths['skipped']}}} | "
@@ -582,6 +581,7 @@ def _save_overall_report(out_fpath: str, metadata: dict) -> None:
         )
         sep = (
             f"{'-' * max_widths['accession']} | "
+            f"{'-' * max_widths['organism']} | "
             f"{'-' * max_widths['total']} | "
             f"{'-' * max_widths['included']} | "
             f"{'-' * max_widths['skipped']} | "
@@ -592,18 +592,19 @@ def _save_overall_report(out_fpath: str, metadata: dict) -> None:
         lines.append(sep + "\n")
 
         sorted_accessions = sorted(
-            accession_stats.items(), key=lambda x: x[1]["total"], reverse=True
+            accession_info.items(), key=lambda x: x[1]["total"], reverse=True
         )
-        for accession, stats in sorted_accessions:
+        for accession, info in sorted_accessions:
             pct = (
-                (stats["included"] / total_included * 100) if total_included > 0 else 0
+                (info["included"] / total_included * 100) if total_included > 0 else 0
             )
             lines.append(
                 fmt.format(
                     accession=accession,
-                    total=f"{stats['total']:,}",
-                    included=f"{stats['included']:,}",
-                    skipped=f"{stats['skipped']:,}",
+                    organism=info["organism_name"],
+                    total=f"{info['total']:,}",
+                    included=f"{info['included']:,}",
+                    skipped=f"{info['skipped']:,}",
                     pct=f"{pct:.2f}%",
                 )
                 + "\n"
@@ -613,6 +614,7 @@ def _save_overall_report(out_fpath: str, metadata: dict) -> None:
         lines.append(
             fmt.format(
                 accession="TOTAL",
+                organism=" " * max_widths["organism"],
                 total=f"{total_all:,}",
                 included=f"{total_included:,}",
                 skipped=f"{total_skipped:,}",
@@ -629,8 +631,8 @@ def _save_overall_report(out_fpath: str, metadata: dict) -> None:
 
         # Collect all reason keys across accessions to build columns
         all_reasons = set()
-        for stats in extraction_stats.values():
-            all_reasons.update(stats.get("skip_reasons", {}).keys())
+        for info in extraction_stats.values():
+            all_reasons.update(info.get("skip_reasons", {}).keys())
         all_reasons = sorted(all_reasons)
 
         if not all_reasons:
@@ -660,9 +662,9 @@ def _save_overall_report(out_fpath: str, metadata: dict) -> None:
             total_transcripts = 0
             total_reasons = {r: 0 for r in all_reasons}
 
-            for accession, stats in extraction_stats.items():
-                num_extracted = stats.get("num_extracted", 0)
-                skip_reasons = stats.get("skip_reasons", {})
+            for accession, info in extraction_stats.items():
+                num_extracted = info.get("num_extracted", 0)
+                skip_reasons = info.get("skip_reasons", {})
                 acc_skipped = sum(skip_reasons.values())
                 acc_transcripts = num_extracted + acc_skipped
 
@@ -712,11 +714,11 @@ def _save_overall_report(out_fpath: str, metadata: dict) -> None:
             lines.append(sep + "\n")
 
             # Rows per accession (sorted by accession)
-            for accession, stats in sorted(
+            for accession, info in sorted(
                 extraction_stats.items(), key=lambda x: x[0]
             ):
-                num_extracted = stats.get("num_extracted", 0)
-                skip_reasons = stats.get("skip_reasons", {})
+                num_extracted = info.get("num_extracted", 0)
+                skip_reasons = info.get("skip_reasons", {})
                 acc_skipped = sum(skip_reasons.values())
                 row = {
                     "accession": accession,
@@ -740,11 +742,6 @@ def _save_overall_report(out_fpath: str, metadata: dict) -> None:
                 total_row[r] = f"{total_reasons[r]:,}"
             lines.append(fmt.format(**total_row) + "\n\n")
 
-    lines.append("SUGGESTED ADDITIONAL METRICS\n")
-    lines.append("-" * separator_width + "\n")
-    lines.append("* Median/mean 3'UTR length across included terminators\n")
-    lines.append("* Entropy/information content per position (for logos)\n")
-    lines.append("\n")
     lines.append("=" * separator_width + "\n")
 
     with open(out_fpath, "w") as f:
@@ -780,7 +777,7 @@ def _save_region_report(
             f"Expected Region:        {CE_EXPECTED_START} to {CE_EXPECTED_END}\n"
         )
 
-    lines.append("See 'analysis_overview.txt' for totals and accession breakdown.\n\n")
+    lines.append("\n")
 
     lines.append(f"TOP {len(ranked_kmers)} K-MERS\n")
     lines.append("-" * separator_width + "\n")

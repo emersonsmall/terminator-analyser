@@ -1,5 +1,6 @@
-# Output folder
 out/
+.idea
+.github
 
 *.db
 
