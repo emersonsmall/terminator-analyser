@@ -1,3 +1,6 @@
+# Built-in libraries
+import os
+
 # External libraries
 import pandas as pd
 import matplotlib
@@ -9,6 +12,7 @@ matplotlib.use("Agg")
 LINESTYLES = ["-", "--", "-.", ":"]
 MARKERS = ["o", "s", "^", "D", "v", "P", "*", "X"]
 NUM_LEGEND_COLS = 5
+PLOT_FILE_SUFFIX = "_signals_plot.png"
 
 
 def plot_signal_distribution(
@@ -17,7 +21,7 @@ def plot_signal_distribution(
     region: str,
     x_min: int,
     x_max: int,
-    out_file: str,
+    out_dir: str,
 ) -> None:
     """
     Generates and saves a line plot using a list of ranked k-mers and their positional counts.
@@ -25,7 +29,7 @@ def plot_signal_distribution(
     Args:
         ranked_kmers: List of dictionaries containing k-mer information.
         counts_data: Dictionary with k-mer positional counts.
-        region: Name of the region being analyzed.
+        region: Name of the region being analysed.
         out_file: Path to save the output plot image.
     """
 
@@ -100,6 +104,7 @@ def plot_signal_distribution(
     plt.tight_layout()
 
     # Save plot
-    plt.savefig(out_file, dpi=300)
-    print(f"Plot saved to '{out_file}'")
+    fpath = os.path.join(out_dir, region + PLOT_FILE_SUFFIX)
+    plt.savefig(fpath, dpi=300)
+    print(f"Plot saved to '{fpath}'")
     plt.close()

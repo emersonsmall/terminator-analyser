@@ -21,24 +21,16 @@ class NoUTRException(Exception):
     """Raised when a transcript has no implied 3' UTR based on CDS and exon coordinates."""
     pass
 
-
 class InvalidStrandException(Exception):
     """Raised when a transcript has an invalid or unknown strand."""
     pass
-
 
 class NoCDSException(Exception):
     """Raised when a transcript has no CDS features."""
     pass
 
-
 class NoExonException(Exception):
     """Raised when a transcript has no exon features."""
-    pass
-
-
-class FailedFilterException(Exception):
-    """Raised when a terminator sequence fails filtering criteria."""
     pass
 
 
@@ -86,24 +78,6 @@ def add_extract_args(
         "--raw-dna",
         action="store_true",
         help="Output raw DNA sequences instead of transcribed RNA.",
-    )
-    parser.add_argument(
-        "--filter-consecutive-a",
-        type=int,
-        default=6,
-        help="Filter out terminators with this many consecutive 'A's in the first <filter-window-size> downstream nts (default: 6). Set to 0 to disable.",
-    )
-    parser.add_argument(
-        "--filter-window-a",
-        type=int,
-        default=8,
-        help="Filter out terminators with this many 'A's in the first <filter-window-size> downstream nts (default: 8). Set to 0 to disable.",
-    )
-    parser.add_argument(
-        "--filter-window-size",
-        type=int,
-        default=10,
-        help="Number of downstream nts to check for internal priming artifacts (default: 10).",
     )
     parser.add_argument(
         "-d",
@@ -208,32 +182,6 @@ def _extract_terminator(
     return term_seq.upper()
 
 
-def _passes_filter(term_seq: str, args: argparse.Namespace) -> bool:
-    """
-    Applies filters to the terminator sequence.
-
-    Returns:
-        True, if the sequence passes the filters, False otherwise.
-    """
-
-    if args.raw_dna:
-        return True
-
-    downstream_seq = term_seq[-args.num_downstream_nt :]
-    if len(downstream_seq) < args.filter_window_size:
-        return False
-
-    if _is_internal_priming_artifact(
-        downstream_seq,
-        args.filter_consecutive_a,
-        args.filter_window_a,
-        args.filter_window_size,
-    ):
-        return False
-
-    return True
-
-
 def _process_transcript(
     tscript: gffutils.Feature,
     db: gffutils.FeatureDB,
@@ -269,11 +217,6 @@ def _process_transcript(
         tscript, fasta, cds_features, exon_features, args.num_downstream_nt
     )
 
-    if not _passes_filter(term_seq, args):
-        raise FailedFilterException(
-            f"Transcript '{tscript.id}' terminator sequence failed filtering."
-        )
-
     return _format_fasta_record(tscript, term_seq, args.raw_dna)
 
 
@@ -287,11 +230,6 @@ def _extract_all_terminators(file_pair: tuple, args: argparse.Namespace) -> dict
     """
 
     fasta_fpath, annotation_fpath = file_pair
-
-    assert os.path.isfile(fasta_fpath), f"Fasta file '{fasta_fpath}' does not exist."
-    assert os.path.isfile(
-        annotation_fpath
-    ), f"Annotation file '{annotation_fpath}' does not exist."
 
     base = os.path.basename(fasta_fpath)
     accession = os.path.splitext(base)[0]
@@ -351,8 +289,6 @@ def _extract_all_terminators(file_pair: tuple, args: argparse.Namespace) -> dict
             skip_reasons["no_cds"] = skip_reasons.get("no_cds", 0) + 1
         except NoExonException:
             skip_reasons["no_exon"] = skip_reasons.get("no_exon", 0) + 1
-        except FailedFilterException:
-            skip_reasons["filter_failed"] = skip_reasons.get("filter_failed", 0) + 1
         except Exception as e:
             print(
                 f"WARNING: Unexpected error processing '{tscript.id}': {e}",
@@ -372,44 +308,6 @@ def _extract_all_terminators(file_pair: tuple, args: argparse.Namespace) -> dict
         "num_extracted": len(out_records),
         "skip_reasons": skip_reasons,
     }
-
-
-def _is_internal_priming_artifact(
-    downstream_sequence: str, consecutive_a: int, total_a: int, window_size: int
-) -> bool:
-    """
-    Checks if the given downstream sequence indicates an internal priming artifact.
-    Methodology based on Beaudong et al. DOI: 10.1101/gr.10.7.1001
-
-    Args:
-        downstream_sequence: The downstream sequence to check.
-        consecutive_a: The number of consecutive 'A's to classify sequence as an artifact.
-        total_a: The total number of 'A's in the window to classify sequence as an artifact.
-        window_size: The number of nucleotides to check from the start of the sequence.
-
-    Returns:
-        bool: True if the sequence is an internal priming artifact, False otherwise.
-    """
-
-    assert (
-        len(downstream_sequence) >= window_size
-    ), "Downstream sequence length must be greater than or equal to window size."
-    assert consecutive_a >= 0, "Filter for consecutive A's must be non-negative."
-    assert total_a >= 0, "Filter for total A's in window must be non-negative."
-    assert window_size > 0, "Window size must be greater than 0."
-
-    if consecutive_a == 0 and total_a == 0:
-        return False
-
-    region_to_check = downstream_sequence[:window_size]
-
-    if consecutive_a > 0 and "A" * consecutive_a in region_to_check:
-        return True
-
-    if total_a > 0 and region_to_check.count("A") >= total_a:
-        return True
-
-    return False
 
 
 # --- HELPER FUNCTIONS ---
@@ -449,8 +347,6 @@ def _get_file_pairs(
     Returns:
         A list of tuples, where each tuple is a pair of FASTA and GFF file paths.
     """
-
-    assert os.path.isdir(dir), f"Folder '{dir}' does not exist or is not a directory."
 
     files_by_basename = defaultdict(dict)
 
@@ -497,8 +393,6 @@ def _create_gff_db(annotation_fpath: str, db_fpath: str) -> gffutils.FeatureDB:
     Returns:
         A gffutils.FeatureDB object.
     """
-
-    assert os.path.isfile(annotation_fpath), f"'{annotation_fpath}' does not exist."
 
     if not os.path.isfile(db_fpath):
         print(f"Creating FeatureDB at '{db_fpath}'")
