@@ -11,6 +11,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from urllib.parse import quote
 
+# Internal modules
+from constants import VALID_FASTA_EXTS, VALID_ANNOTATION_EXTS
 
 NCBI_DATASETS_API_BASE_URL = "https://api.ncbi.nlm.nih.gov/datasets/v2"
 TAXON_ENDPOINT = f"{NCBI_DATASETS_API_BASE_URL}/genome/taxon"
@@ -21,9 +23,6 @@ RETRIES = 3
 TIMEOUT_IN_SECONDS = 30
 CHUNK_SIZE = 32 * 1024
 BACKOFF_FACTOR = 0.3
-
-VALID_FASTA_EXTS = (".fna", ".fa", ".fasta")
-VALID_ANNOTATION_EXTS = (".gff", ".gff3", ".gtf")
 
 
 def main():

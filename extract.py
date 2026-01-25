@@ -12,7 +12,7 @@ import pyfaidx  # https://anaconda.org/bioconda/pyfaidx
 import gffutils  # https://anaconda.org/bioconda/gffutils
 
 # Internal modules
-from get_genomes import VALID_FASTA_EXTS, VALID_ANNOTATION_EXTS
+from constants import VALID_FASTA_EXTS, VALID_ANNOTATION_EXTS
 
 # utr refers to 3'UTR unless otherwise specified
 
