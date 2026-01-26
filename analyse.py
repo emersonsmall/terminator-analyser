@@ -20,7 +20,7 @@ from constants import CE_EXPECTED_END, CE_EXPECTED_START, NUE_EXPECTED_END, NUE_
 
 # Coordinates: -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 
-# Analysis window coordinates - used for counting kmers
+# Analysis window coordinates
 NUE_ANALYSIS_WINDOW_START = -50
 NUE_ANALYSIS_WINDOW_END = -1
 CE_ANALYSIS_WINDOW_START = (
@@ -178,6 +178,29 @@ def run_analysis(args: argparse.Namespace) -> None:
         print(f"ERROR: {traceback.format_exc()}", file=sys.stderr)
 
 
+def _window_coords_arg(val: str) -> tuple[tuple[int, int], ...]:
+    coord_pair_strs = [v.strip() for v in val.split(";") if v.strip()]
+    coord_pairs = []
+
+    for coord_pair in coord_pair_strs:
+        try:
+            start_str, end_str = coord_pair.split(",")
+            start = int(start_str)
+            end = int(end_str)
+            if start >= end:
+                raise ValueError
+            coord_pairs.append((start, end))
+        except ValueError:
+            raise argparse.ArgumentTypeError(
+                f"invalid coordinate pair '{coord_pair}', must be in format '<start>,<end>' with start < end"
+            )
+
+    if not coord_pairs:
+        raise argparse.ArgumentTypeError("requires at least one coordinate pair")
+    
+    return tuple(coord_pairs)
+
+
 def add_analyse_args(
     parser: argparse.ArgumentParser, is_standalone: bool = False
 ) -> None:
@@ -235,6 +258,18 @@ def add_analyse_args(
         default=10,
         help="Number of downstream nts to check for internal priming artifacts (default: 10).",
     )
+    parser.add_argument(
+        "--analysis-window-coords",
+        type=_window_coords_arg,
+        default=None,
+        help="Semicolon-separated list of start,end coordinate pairs defining analysis windows (default: ((-50, -1), (-10, 20))).",
+    )
+    parser.add_argument(
+        "--expected-window-coords",
+        type=_window_coords_arg,
+        default=None,
+        help="Semicolon-separated list of start,end coordinate pairs defining expected regions for analysis windows (default: ((-30, -13), (-10, 10))).",
+    )
 
     if is_standalone:
         parser.add_argument(
@@ -250,31 +285,56 @@ def add_analyse_args(
         )
 
 
+def validate_analyse_args(args: argparse.Namespace) -> None:
+    """
+    Validates the command-line arguments for the `analyse` command.
+    """
+    if args.min_3utr_length < abs(NUE_ANALYSIS_WINDOW_START):
+        raise ValueError(
+            f"Minimum 3'UTR length must be at least {abs(NUE_ANALYSIS_WINDOW_START)}."
+        )
+
+    if args.num_downstream_nt < CE_ANALYSIS_WINDOW_END:
+        raise ValueError(f"Downstream nts must be at least {CE_ANALYSIS_WINDOW_END}.")
+
+    has_analysis = args.analysis_window_coords is not None
+    has_expected = args.expected_window_coords is not None
+
+    # both or neither must be provided
+    if has_analysis != has_expected:
+        raise ValueError("Both --analysis-window-coords and --expected-window-coords must be provided together.")
+
+    # apply defaults if neither provided
+    args.analysis_window_coords = (
+        (NUE_ANALYSIS_WINDOW_START, NUE_ANALYSIS_WINDOW_END),
+        (CE_ANALYSIS_WINDOW_START, CE_ANALYSIS_WINDOW_END),
+    )
+    args.expected_window_coords = (
+        (NUE_EXPECTED_START, NUE_EXPECTED_END),
+        (CE_EXPECTED_START, CE_EXPECTED_END),
+    )
+
+
 def _get_args() -> argparse.Namespace:
     """Parses and validates command-line arguments for standalone execution.
 
     Returns:
-        argparse.Namespace: Parsed command-line arguments.
+        Parsed command-line arguments.
     """
-
     parser = argparse.ArgumentParser(
-        description="Analyses the NUE and CE regions of the given terminator sequences."
+        description="Analyses the specified regions of the given terminator sequences."
     )
 
     add_analyse_args(parser, is_standalone=True)
-
     args = parser.parse_args()
 
     if not os.path.exists(args.input_path):
         parser.error(f"'{args.input_path}' does not exist.")
 
-    if not args.min_3utr_length >= abs(NUE_ANALYSIS_WINDOW_START):
-        parser.error(
-            f"Minimum 3'UTR length must be at least {abs(NUE_ANALYSIS_WINDOW_START)}."
-        )
-
-    if not args.num_downstream_nt >= CE_ANALYSIS_WINDOW_END:
-        parser.error(f"Downstream nts must be at least {CE_ANALYSIS_WINDOW_END}.")
+    try:
+        validate_analyse_args(args)
+    except ValueError as e:
+        parser.error(str(e))
 
     return args
 
@@ -367,14 +427,14 @@ def _process_terminator_fasta(fasta_fpath: str, args: argparse.Namespace) -> tup
         num_terminators += 1
 
         seq = str(record)
-        total_len = len(seq)
-        utr_len = total_len - args.num_downstream_nt
 
-        if utr_len < args.min_3utr_length or not _terminator_passes_filter(seq, args):
+        if not _terminator_passes_filter(seq, args):
             num_skipped += 1
             continue
 
         terminators.append(seq)
+
+    # TODO: for window in args.analysis_window_coords, expected_region in args.expected_window_coords etc
 
     nue_counts, nue_occurrence_counts = _count_kmers(
         terminators,
@@ -529,10 +589,13 @@ def _terminator_passes_filter(term_seq: str, args: argparse.Namespace) -> bool:
     Applies filters to the terminator sequence.
 
     Returns:
-        True, if the sequence passes the filters, False otherwise.
+        True, if the terminator sequence passes the filters, False otherwise.
     """
 
-    downstream_seq = term_seq[-args.num_downstream_nt :]
+    if len(term_seq) - args.num_downstream_nt < args.min_3utr_length:
+        return False
+
+    downstream_seq = term_seq[-args.num_downstream_nt:]
     if len(downstream_seq) < args.filter_window_size:
         return False
 

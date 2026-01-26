@@ -5,9 +5,15 @@ import os
 import traceback
 
 # Local modules
-from get_genomes import run_get_genomes, add_get_args
-from extract import run_extraction, add_extract_args
-from analyse import run_analysis, add_analyse_args
+from get_genomes import run_get_genomes, add_get_args, validate_get_args
+from extract import run_extraction, add_extract_args, validate_extract_args
+from analyse import run_analysis, add_analyse_args, validate_analyse_args
+
+
+def validate_all_args(args: argparse.Namespace) -> None:
+    validate_get_args(args)
+    validate_extract_args(args)
+    validate_analyse_args(args)
 
 
 def main():
@@ -49,15 +55,20 @@ def main():
 
     try:
         if args.command == "get":
+            validate_get_args(args)
             run_get_genomes(args)
 
         elif args.command == "extract":
+            validate_extract_args(args)
             run_extraction(args)
 
         elif args.command == "analyse":
+            validate_analyse_args(args)
             run_analysis(args)
 
         elif args.command == "full":
+            validate_all_args(args)
+
             print("\nGETTING GENOMES")
             genomes = run_get_genomes(args)
             if not genomes:

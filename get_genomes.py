@@ -45,10 +45,10 @@ def run_get_genomes(args: argparse.Namespace) -> dict[str, str] | None:
 
 
 def _exclude_accessions_arg(val: str) -> set[str]:
-    items = [v.strip() for v in val.split(",") if v.strip()]
-    if not items:
+    accessions = [v.strip() for v in val.split(",") if v.strip()]
+    if not accessions:
         raise argparse.ArgumentTypeError("requires at least one accession")
-    return set(items)
+    return set(accessions)
 
 
 def add_get_args(parser: argparse.ArgumentParser, is_standalone: bool = True) -> None:
@@ -93,15 +93,33 @@ def add_get_args(parser: argparse.ArgumentParser, is_standalone: bool = True) ->
     )
 
 
-def _get_args() -> argparse.Namespace:
-    """Gets arguments for standalone script execution."""
+def validate_get_args(args: argparse.Namespace) -> None:
+    """
+    Validates the command-line arguments for the `get` command.
+    """
+    if args.max_genomes is not None and args.max_genomes <= 0:
+        raise ValueError("Maximum genomes must be a positive integer.")
 
+
+def _get_args() -> argparse.Namespace:
+    """Parses and validates command-line arguments for standalone execution.
+
+    Returns:
+        Parsed command-line arguments.
+    """
     parser = argparse.ArgumentParser(
         description="Gets FASTA and annotation files for the given taxon using the NCBI Datasets API"
     )
 
     add_get_args(parser, is_standalone=True)
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    try:
+        validate_get_args(args)
+    except ValueError as e:
+        parser.error(str(e))
+
+    return args
 
 
 def _get_genomes_by_taxon(

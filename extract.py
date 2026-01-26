@@ -42,11 +42,10 @@ def run_extraction(args: argparse.Namespace) -> None:
     try:
         genomes = getattr(args, "genomes", {})
         file_pairs = _get_file_pairs(args.input_dir, list(genomes.keys()))
+        extraction_stats = {}
 
         # process each genome in parallel
         worker = partial(_extract_all_terminators, args=args)
-
-        extraction_stats = {}
         with Pool() as pool:
             for result in pool.imap_unordered(worker, file_pairs):
                 if result:
@@ -55,9 +54,7 @@ def run_extraction(args: argparse.Namespace) -> None:
                         "skip_reasons": result["skip_reasons"],
                     }
 
-        args.extraction_stats = (
-            extraction_stats  # store stats in args for downstream use
-        )
+        args.extraction_stats = extraction_stats # store in args for downstream use
 
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -99,18 +96,33 @@ def add_extract_args(
         )
 
 
-def _get_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Extract terminators for the given genomes/genus."
-    )
-    add_extract_args(parser)
+def validate_extract_args(args: argparse.Namespace) -> None:
+    if args.num_downstream_nt < 0:
+        raise ValueError("Number of downstream nucleotides must be non-negative.")
 
+
+def _get_args() -> argparse.Namespace:
+    """Parses and validates command-line arguments for standalone execution.
+
+    Returns:
+        Parsed command-line arguments.
+    """
+    parser = argparse.ArgumentParser(
+        description="Extract terminators for the given set of genomes."
+    )
+
+    add_extract_args(parser)
     args = parser.parse_args()
 
     if not os.path.isdir(args.input_dir):
         parser.error(
             f"Input directory '{args.input_dir}' does not exist or is not a directory."
         )
+
+    try:
+        validate_extract_args(args)
+    except ValueError as e:
+        parser.error(str(e))
 
     return args
 
@@ -257,7 +269,7 @@ def _extract_all_terminators(file_pair: tuple, args: argparse.Namespace) -> dict
     fasta = pyfaidx.Fasta(fasta_fpath)
     db = _create_gff_db(annotation_fpath, db_fpath)
 
-    transcript_labels = ("mRNA", "transcript")  # GFF uses "mRNA", GTF uses "transcript"
+    transcript_labels = ("mRNA", "transcript")  # GFF has "mRNA", GTF has "transcript"
     transcripts = []
     for t_label in transcript_labels:
         try:
