@@ -187,7 +187,7 @@ def _window_coords_arg(val: str) -> tuple[tuple[int, int], ...]:
             start_str, end_str = coord_pair.split(",")
             start = int(start_str)
             end = int(end_str)
-            if start >= end:
+            if start >= end and start != 0 and end != 0:
                 raise ValueError
             coord_pairs.append((start, end))
         except ValueError:
