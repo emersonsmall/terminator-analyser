@@ -19,18 +19,25 @@ from constants import VALID_FASTA_EXTS, VALID_ANNOTATION_EXTS
 
 class NoUTRException(Exception):
     """Raised when a transcript has no implied 3' UTR based on CDS and exon coordinates."""
+
     pass
+
 
 class InvalidStrandException(Exception):
     """Raised when a transcript has an invalid or unknown strand."""
+
     pass
+
 
 class NoCDSException(Exception):
     """Raised when a transcript has no CDS features."""
+
     pass
+
 
 class NoExonException(Exception):
     """Raised when a transcript has no exon features."""
+
     pass
 
 
@@ -54,7 +61,7 @@ def run_extraction(args: argparse.Namespace) -> None:
                         "skip_reasons": result["skip_reasons"],
                     }
 
-        args.extraction_stats = extraction_stats # store in args for downstream use
+        args.extraction_stats = extraction_stats  # store in args for downstream use
 
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -347,9 +354,7 @@ def _format_fasta_record(
     return f"{header}\n{wrapped_seq}\n"
 
 
-def _get_file_pairs(
-    dir: str, accessions: list[str]
-) -> list[tuple[str, str]]:
+def _get_file_pairs(dir: str, accessions: list[str]) -> list[tuple[str, str]]:
     """
     Searches the given directory for matching pairs of FASTA and GFF files.
 

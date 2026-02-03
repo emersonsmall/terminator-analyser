@@ -5,7 +5,7 @@ import os
 import traceback
 
 # Local modules
-from get_genomes import run_get_genomes, add_get_args, validate_get_args
+from get import run_get_genomes, add_get_args, validate_get_args
 from extract import run_extraction, add_extract_args, validate_extract_args
 from analyse import run_analysis, add_analyse_args, validate_analyse_args
 

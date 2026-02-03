@@ -1,4 +1,9 @@
-from constants import CE_EXPECTED_END, CE_EXPECTED_START, NUE_EXPECTED_END, NUE_EXPECTED_START
+from constants import (
+    CE_EXPECTED_END,
+    CE_EXPECTED_START,
+    NUE_EXPECTED_END,
+    NUE_EXPECTED_START,
+)
 
 
 def save_overview_report(out_fpath: str, metadata: dict) -> None:
@@ -62,7 +67,9 @@ def save_overview_report(out_fpath: str, metadata: dict) -> None:
 
         for accession, info in accession_info.items():
             max_widths["accession"] = max(max_widths["accession"], len(accession))
-            max_widths["organism"] = max(max_widths["organism"], len(info["organism_name"]))
+            max_widths["organism"] = max(
+                max_widths["organism"], len(info["organism_name"])
+            )
 
         max_widths["total"] = max(max_widths["total"], len(f"{total_all:,}"))
         max_widths["included"] = max(max_widths["included"], len(f"{total_included:,}"))
@@ -92,9 +99,7 @@ def save_overview_report(out_fpath: str, metadata: dict) -> None:
             accession_info.items(), key=lambda x: x[1]["total"], reverse=True
         )
         for accession, info in sorted_accessions:
-            pct = (
-                (info["included"] / total_included * 100) if total_included > 0 else 0
-            )
+            pct = (info["included"] / total_included * 100) if total_included > 0 else 0
             lines.append(
                 fmt.format(
                     accession=accession,
@@ -211,9 +216,7 @@ def save_overview_report(out_fpath: str, metadata: dict) -> None:
             lines.append(sep + "\n")
 
             # Rows per accession (sorted by accession)
-            for accession, info in sorted(
-                extraction_stats.items(), key=lambda x: x[0]
-            ):
+            for accession, info in sorted(extraction_stats.items(), key=lambda x: x[0]):
                 num_extracted = info.get("num_extracted", 0)
                 skip_reasons = info.get("skip_reasons", {})
                 acc_skipped = sum(skip_reasons.values())
@@ -307,7 +310,9 @@ def save_region_report(
             maxw["peak"] = max(maxw["peak"], len(f"{item['peak_count']:,}"))
             maxw["median"] = max(maxw["median"], len(f"{item['median_count']:.1f}"))
             maxw["pos"] = max(maxw["pos"], len(str(item["peak_pos"])))
-            maxw["occurrences"] = max(maxw["occurrences"], len(f"{item['occurrence_count']:,}"))
+            maxw["occurrences"] = max(
+                maxw["occurrences"], len(f"{item['occurrence_count']:,}")
+            )
             maxw["pct"] = max(maxw["pct"], len(f"{item['pct_occurrence']:.1f}%"))
 
         fmt = (

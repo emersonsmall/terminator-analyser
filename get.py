@@ -31,7 +31,7 @@ def main():
 
 def run_get_genomes(args: argparse.Namespace) -> dict[str, str] | None:
     try:
-        return _get_genomes_by_taxon(
+        return _get_genomes(
             args.taxon,
             args.genomes_dir,
             args.api_key,
@@ -122,7 +122,7 @@ def _get_args() -> argparse.Namespace:
     return args
 
 
-def _get_genomes_by_taxon(
+def _get_genomes(
     taxon: str,
     output_dir: str,
     api_key: str | None,
@@ -150,7 +150,7 @@ def _get_genomes_by_taxon(
         os.makedirs(output_dir, exist_ok=True)
 
         num_genomes = len(dataset_reports)
-        genomes = {} # {accession: organism_name}
+        genomes = {}  # {accession: organism_name}
         num_downloaded = 0
 
         for i, report in enumerate(dataset_reports, start=1):

@@ -16,7 +16,12 @@ import pyfaidx
 # Local modules
 from plots import plot_signal_distribution
 from reports import save_overview_report, save_region_report
-from constants import CE_EXPECTED_END, CE_EXPECTED_START, NUE_EXPECTED_END, NUE_EXPECTED_START
+from constants import (
+    CE_EXPECTED_END,
+    CE_EXPECTED_START,
+    NUE_EXPECTED_END,
+    NUE_EXPECTED_START,
+)
 
 # Coordinates: -1 is the last nt of the 3'UTR, +1 is the first nt of the downstream region
 
@@ -86,9 +91,13 @@ def run_analysis(args: argparse.Namespace) -> None:
 
                 # merge occurrence counts
                 for kmer, count in nue_occurrence_counts.items():
-                    total_nue_occurrence_counts[kmer] = total_nue_occurrence_counts.get(kmer, 0) + count
+                    total_nue_occurrence_counts[kmer] = (
+                        total_nue_occurrence_counts.get(kmer, 0) + count
+                    )
                 for kmer, count in ce_occurrence_counts.items():
-                    total_ce_occurrence_counts[kmer] = total_ce_occurrence_counts.get(kmer, 0) + count
+                    total_ce_occurrence_counts[kmer] = (
+                        total_ce_occurrence_counts.get(kmer, 0) + count
+                    )
 
                 total_skipped += num_skipped
                 total_terminators += num_terminators
@@ -197,7 +206,7 @@ def _window_coords_arg(val: str) -> tuple[tuple[int, int], ...]:
 
     if not coord_pairs:
         raise argparse.ArgumentTypeError("requires at least one coordinate pair")
-    
+
     return tuple(coord_pairs)
 
 
@@ -302,7 +311,9 @@ def validate_analyse_args(args: argparse.Namespace) -> None:
 
     # both or neither must be provided
     if has_analysis != has_expected:
-        raise ValueError("Both --analysis-window-coords and --expected-window-coords must be provided together.")
+        raise ValueError(
+            "Both --analysis-window-coords and --expected-window-coords must be provided together."
+        )
 
     # apply defaults if neither provided
     args.analysis_window_coords = (
@@ -595,7 +606,7 @@ def _terminator_passes_filter(term_seq: str, args: argparse.Namespace) -> bool:
     if len(term_seq) - args.num_downstream_nt < args.min_3utr_length:
         return False
 
-    downstream_seq = term_seq[-args.num_downstream_nt:]
+    downstream_seq = term_seq[-args.num_downstream_nt :]
     if len(downstream_seq) < args.filter_window_size:
         return False
 
