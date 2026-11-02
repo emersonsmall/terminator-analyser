@@ -3,4 +3,3 @@ pyfaidx
 pandas
 matplotlib
 requests
-logomaker
