@@ -47,8 +47,8 @@ def run_analysis(args: argparse.Namespace) -> None:
     try:
         # Find all fasta files
         fasta_files = []
+        genomes = getattr(args, "genomes", {})  # only set on 'full' runs
         if os.path.isdir(args.input_path):
-            genomes = getattr(args, "genomes", {})
             fasta_files = _get_fasta_files(args.input_path, list(genomes.keys()))
             print(f"Found {len(fasta_files)} FASTA files")
         elif os.path.isfile(args.input_path):
@@ -102,7 +102,7 @@ def run_analysis(args: argparse.Namespace) -> None:
                 total_skipped += num_skipped
                 total_terminators += num_terminators
                 accession_info[accession] = {
-                    "organism_name": args.genomes.get(accession, "Unknown"),
+                    "organism_name": genomes.get(accession, "Unknown"),
                     "total": num_terminators,
                     "included": num_terminators - num_skipped,
                     "skipped": num_skipped,
@@ -187,29 +187,6 @@ def run_analysis(args: argparse.Namespace) -> None:
         print(f"ERROR: {traceback.format_exc()}", file=sys.stderr)
 
 
-def _window_coords_arg(val: str) -> tuple[tuple[int, int], ...]:
-    coord_pair_strs = [v.strip() for v in val.split(";") if v.strip()]
-    coord_pairs = []
-
-    for coord_pair in coord_pair_strs:
-        try:
-            start_str, end_str = coord_pair.split(",")
-            start = int(start_str)
-            end = int(end_str)
-            if start >= end and start != 0 and end != 0:
-                raise ValueError
-            coord_pairs.append((start, end))
-        except ValueError:
-            raise argparse.ArgumentTypeError(
-                f"invalid coordinate pair '{coord_pair}', must be in format '<start>,<end>' with start < end"
-            )
-
-    if not coord_pairs:
-        raise argparse.ArgumentTypeError("requires at least one coordinate pair")
-
-    return tuple(coord_pairs)
-
-
 def add_analyse_args(
     parser: argparse.ArgumentParser, is_standalone: bool = False
 ) -> None:
@@ -267,18 +244,6 @@ def add_analyse_args(
         default=10,
         help="Number of downstream nts to check for internal priming artifacts (default: 10).",
     )
-    parser.add_argument(
-        "--analysis-window-coords",
-        type=_window_coords_arg,
-        default=None,
-        help="Semicolon-separated list of start,end coordinate pairs defining analysis windows (default: ((-50, -1), (-10, 20))).",
-    )
-    parser.add_argument(
-        "--expected-window-coords",
-        type=_window_coords_arg,
-        default=None,
-        help="Semicolon-separated list of start,end coordinate pairs defining expected regions for analysis windows (default: ((-30, -13), (-10, 10))).",
-    )
 
     if is_standalone:
         parser.add_argument(
@@ -306,25 +271,6 @@ def validate_analyse_args(args: argparse.Namespace) -> None:
     if args.num_downstream_nt < CE_ANALYSIS_WINDOW_END:
         raise ValueError(f"Downstream nts must be at least {CE_ANALYSIS_WINDOW_END}.")
 
-    has_analysis = args.analysis_window_coords is not None
-    has_expected = args.expected_window_coords is not None
-
-    # both or neither must be provided
-    if has_analysis != has_expected:
-        raise ValueError(
-            "Both --analysis-window-coords and --expected-window-coords must be provided together."
-        )
-
-    # apply defaults if neither provided
-    args.analysis_window_coords = (
-        (NUE_ANALYSIS_WINDOW_START, NUE_ANALYSIS_WINDOW_END),
-        (CE_ANALYSIS_WINDOW_START, CE_ANALYSIS_WINDOW_END),
-    )
-    args.expected_window_coords = (
-        (NUE_EXPECTED_START, NUE_EXPECTED_END),
-        (CE_EXPECTED_START, CE_EXPECTED_END),
-    )
-
 
 def _get_args() -> argparse.Namespace:
     """Parses and validates command-line arguments for standalone execution.
@@ -333,7 +279,7 @@ def _get_args() -> argparse.Namespace:
         Parsed command-line arguments.
     """
     parser = argparse.ArgumentParser(
-        description="Analyses the specified regions of the given terminator sequences."
+        description="Analyses the NUE and CE regions of the given terminator sequences."
     )
 
     add_analyse_args(parser, is_standalone=True)
@@ -444,8 +390,6 @@ def _process_terminator_fasta(fasta_fpath: str, args: argparse.Namespace) -> tup
             continue
 
         terminators.append(seq)
-
-    # TODO: for window in args.analysis_window_coords, expected_region in args.expected_window_coords etc
 
     nue_counts, nue_occurrence_counts = _count_kmers(
         terminators,
